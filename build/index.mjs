@@ -629,7 +629,7 @@ import { pgTable as pgTable2, serial as serial2, timestamp as timestamp2, varcha
 var tags = pgTable2("tags", {
   id: serial2("id").primaryKey().notNull(),
   name: varchar2("name", { length: 255 }).notNull().unique(),
-  color: varchar2("color", { length: 255 }),
+  color: varchar2("color", { length: 255 }).notNull(),
   description: varchar2("description", { length: 255 }),
   createdAt: timestamp2("created_at").defaultNow(),
   updatedAt: timestamp2("updated_at"),
@@ -1936,7 +1936,8 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       isSpend: transactions.isSpend
@@ -1963,7 +1964,8 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       isSpend: transactions.isSpend
@@ -1991,7 +1993,8 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       isSpend: transactions.isSpend
@@ -2011,7 +2014,8 @@ var TransactionsController = class {
       paymentType: paymentType.name,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       isSpend: transactions.isSpend
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(this.notRemovedCondition()).orderBy(desc3(transactions.createdAt));
     if (limit) query.limit(limit);
@@ -2033,7 +2037,8 @@ var TransactionsController = class {
       paymentType: paymentType.name,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       isSpend: transactions.isSpend
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(
       and4(this.notRemovedCondition(), gte2(transactions.createdAt, monthStart))
@@ -2055,7 +2060,8 @@ var TransactionsController = class {
       paymentType: paymentType.name,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
-      tag: tags.name,
+      tagName: tags.name,
+      tagColor: tags.color,
       isSpend: transactions.isSpend
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(
       and4(
@@ -2200,7 +2206,8 @@ var getAllTransactionsByMonthRoute = async (app2) => {
                   isSpend: z20.boolean(),
                   amount: z20.number(),
                   paymentType: z20.string(),
-                  tag: z20.string()
+                  tagName: z20.string(),
+                  tagColor: z20.string()
                 })
               ),
               incomes: z20.array(
@@ -2210,7 +2217,8 @@ var getAllTransactionsByMonthRoute = async (app2) => {
                   isSpend: z20.boolean(),
                   amount: z20.number(),
                   paymentType: z20.string(),
-                  tag: z20.string()
+                  tagName: z20.string(),
+                  tagColor: z20.string()
                 })
               ),
               details: z20.object({
@@ -2272,7 +2280,8 @@ var getAllTransactionsPaymentTypeRoute = async (app2) => {
                 isSpend: z21.boolean(),
                 amount: z21.number(),
                 paymentType: z21.string(),
-                tag: z21.string()
+                tagName: z21.string(),
+                tagColor: z21.string()
               })
             )
           }),
@@ -2318,7 +2327,8 @@ var transactionSchema = z22.object({
   isSpend: z22.boolean(),
   amount: z22.number(),
   paymentType: z22.string(),
-  tag: z22.string()
+  tagName: z22.string(),
+  tagColor: z22.string()
 });
 var getAllTransactionsRoute = async (app2) => {
   app2.get(
@@ -2383,7 +2393,8 @@ var getAllTransactionsTagRoute = async (app2) => {
                 isSpend: z23.boolean(),
                 amount: z23.number(),
                 paymentType: z23.string(),
-                tag: z23.string()
+                tagName: z23.string(),
+                tagColor: z23.string()
               })
             )
           }),
@@ -2429,7 +2440,8 @@ var transactionSchema2 = z24.object({
   isSpend: z24.boolean(),
   amount: z24.number(),
   paymentType: z24.string(),
-  tag: z24.string()
+  tagName: z24.string(),
+  tagColor: z24.string()
 });
 var monthlyTransactionSummarySchema = z24.record(
   z24.string(),
@@ -2525,7 +2537,8 @@ var getTransactionRoute = async (app2) => {
             isSpend: z25.boolean(),
             amount: z25.number(),
             paymentType: z25.string(),
-            tag: z25.string()
+            tagName: z25.string(),
+            tagColor: z25.string()
           }),
           [404 /* NOT_FOUND */]: z25.object({
             name: z25.string(),
