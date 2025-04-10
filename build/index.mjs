@@ -539,6 +539,19 @@ async function logger(app2) {
     messageName = "";
     done();
   });
+  app2.setErrorHandler((error, request, reply) => {
+    if (error.code === "FST_ERR_VALIDATION") {
+      const validation = error.validation?.[0];
+      return reply.status(400 /* BAD_REQUEST */).send({
+        name: "ValidationError",
+        message: validation?.message || "Erro de valida\xE7\xE3o."
+      });
+    }
+    return reply.status(500 /* INTERNAL_SERVER_ERROR */).send({
+      name: "InternalError",
+      message: "Algo deu errado."
+    });
+  });
 }
 
 // src/config/plugins.ts
@@ -1710,7 +1723,15 @@ var getMonthAmountRoute = async (app2) => {
         tags: ["Total Amount"],
         operationId: "getMonthAmount",
         querystring: z18.object({
-          month: z18.string(),
+          month: z18.string().refine(
+            (val) => {
+              const num = Number(val);
+              return !Number.isNaN(num) && num >= 1 && num <= 12;
+            },
+            {
+              message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
+            }
+          ),
           year: z18.string().optional(),
           last: z18.string().optional().transform((value) => {
             if (!value) return void 0;
@@ -1832,6 +1853,48 @@ var TransactionHelper = class {
       }
     };
   }
+  separateByMonth() {
+    return this.transactionList.reduce(
+      (months, transaction) => {
+        if (transaction.createdAt) {
+          const monthKey = `${transaction.createdAt.getFullYear()}-${transaction.createdAt.getMonth() + 1}`;
+          if (!months[monthKey]) {
+            months[monthKey] = [];
+          }
+          months[monthKey].push(transaction);
+        }
+        return months;
+      },
+      {}
+    );
+  }
+  separateByMonthWithTotals() {
+    const groupedByMonth = this.separateByMonth();
+    const result = {};
+    for (const [month, transactions2] of Object.entries(groupedByMonth)) {
+      const spends = transactions2.filter((t) => t.isSpend);
+      const incomes = transactions2.filter((t) => !t.isSpend);
+      const totalSpends = spends.reduce(
+        (acc, curr) => acc.add(new Money(curr.amount)),
+        new Money(0)
+      );
+      const totalIncomes = incomes.reduce(
+        (acc, curr) => acc.add(new Money(curr.amount)),
+        new Money(0)
+      );
+      const overallBalance = totalIncomes.subtract(totalSpends);
+      result[month] = {
+        spends,
+        incomes,
+        details: {
+          totalSpends: totalSpends.getReais(),
+          totalIncomes: totalIncomes.getReais(),
+          overallBalance: overallBalance.getReais()
+        }
+      };
+    }
+    return result;
+  }
 };
 
 // src/errors/custom/TransactionError.ts
@@ -1922,15 +1985,9 @@ var TransactionsController = class {
     if (!tagId && !tagName) {
       throw new MissingTransactionParamsError();
     }
-    let id;
-    if (!tagId) {
-      const tag = await this.tagController.getTag({
-        name: tagName
-      });
-      id = tag.id;
-    } else {
-      id = tagId;
-    }
+    const id = tagId ?? (await this.tagController.getTag({
+      name: tagName
+    })).id;
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
@@ -1959,7 +2016,32 @@ var TransactionsController = class {
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(this.notRemovedCondition()).orderBy(desc3(transactions.createdAt));
     if (limit) query.limit(limit);
     const transactionsList = await query;
-    return transactionsList;
+    const transactionHelperInstance = new TransactionHelper(transactionsList);
+    const separatedTransactions = transactionHelperInstance.separateByMonth();
+    return separatedTransactions;
+  }
+  async getAllTransactionsWithMonth({
+    month,
+    year
+  }) {
+    const now = /* @__PURE__ */ new Date();
+    const currentYear = year ? year : now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const monthStart = month ? new Date(currentYear, month - 1, 1) : new Date(currentYear, currentMonth - 4, 1);
+    const query = this.db.select({
+      id: transactions.id,
+      paymentType: paymentType.name,
+      amount: transactions.amount,
+      createdAt: transactions.createdAt,
+      tag: tags.name,
+      isSpend: transactions.isSpend
+    }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(
+      and4(this.notRemovedCondition(), gte2(transactions.createdAt, monthStart))
+    ).orderBy(desc3(transactions.createdAt));
+    const transactionsList = await query;
+    const transactionHelperInstance = new TransactionHelper(transactionsList);
+    const separatedTransactions = transactionHelperInstance.separateByMonthWithTotals();
+    return separatedTransactions;
   }
   async getAllTransactionsByMonth({
     month,
@@ -2075,7 +2157,7 @@ var createTransactionRoute = async (app2) => {
   );
 };
 
-// src/routes/transactions/getAllTransactionsByMonth.ts
+// src/routes/transactions/getAllTransactionsByMonthRoute.ts
 import z20 from "zod";
 var getAllTransactionsByMonthRoute = async (app2) => {
   app2.get(
@@ -2086,8 +2168,25 @@ var getAllTransactionsByMonthRoute = async (app2) => {
         tags: ["Transactions"],
         operationId: "getAllTransactionsByMonth",
         querystring: z20.object({
-          month: z20.string(),
-          year: z20.string().optional()
+          month: z20.string().refine(
+            (val) => {
+              const num = Number(val);
+              return !Number.isNaN(num) && num >= 1 && num <= 12;
+            },
+            {
+              message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
+            }
+          ).transform((val) => Number(val)),
+          year: z20.string().optional().refine(
+            (val) => {
+              if (!val) return true;
+              const num = Number(val);
+              return !Number.isNaN(num) && num > 0;
+            },
+            {
+              message: "O ano deve ser um n\xFAmero v\xE1lido."
+            }
+          )
         }),
         response: {
           [200 /* OK */]: z20.object({
@@ -2124,18 +2223,20 @@ var getAllTransactionsByMonthRoute = async (app2) => {
           [404 /* NOT_FOUND */]: z20.object({
             name: z20.string(),
             message: z20.string()
+          }),
+          [400 /* BAD_REQUEST */]: z20.object({
+            name: z20.string(),
+            message: z20.string()
           })
         }
       }
     },
     async (request, reply) => {
-      const { month: stringMonth, year: stringYear } = request.query;
+      const { month, year: baseYear } = request.query;
+      const year = baseYear ? Number.parseInt(baseYear) : void 0;
       const transactionsController = new TransactionsController(db);
-      const month = Number.parseInt(stringMonth);
-      const year = stringYear ? Number.parseInt(stringYear) : void 0;
       const [error, data] = await catchError(
-        transactionsController.getAllTransactionsByMonth({ month, year }),
-        new TransactionNotFoundError()
+        transactionsController.getAllTransactionsByMonth({ month, year })
       );
       if (error) {
         return reply.status(error.statusCode).send({
@@ -2211,6 +2312,14 @@ var getAllTransactionsPaymentTypeRoute = async (app2) => {
 
 // src/routes/transactions/getAllTransactionsRoute.ts
 import z22 from "zod";
+var transactionSchema = z22.object({
+  id: z22.number(),
+  createdAt: z22.date().nullable(),
+  isSpend: z22.boolean(),
+  amount: z22.number(),
+  paymentType: z22.string(),
+  tag: z22.string()
+});
 var getAllTransactionsRoute = async (app2) => {
   app2.get(
     "/all",
@@ -2224,16 +2333,7 @@ var getAllTransactionsRoute = async (app2) => {
         }),
         response: {
           [200 /* OK */]: z22.object({
-            transactions: z22.array(
-              z22.object({
-                id: z22.number(),
-                createdAt: z22.date().nullable(),
-                isSpend: z22.boolean(),
-                amount: z22.number(),
-                paymentType: z22.string(),
-                tag: z22.string()
-              })
-            )
+            transactions: z22.record(z22.string(), z22.array(transactionSchema))
           }),
           [500 /* INTERNAL_SERVER_ERROR */]: z22.object({
             name: z22.string(),
@@ -2321,8 +2421,92 @@ var getAllTransactionsTagRoute = async (app2) => {
   );
 };
 
-// src/routes/transactions/getTransactionRoute.ts
+// src/routes/transactions/getAllTransactionsWithMonthRoute.ts
 import z24 from "zod";
+var transactionSchema2 = z24.object({
+  id: z24.number(),
+  createdAt: z24.date().nullable(),
+  isSpend: z24.boolean(),
+  amount: z24.number(),
+  paymentType: z24.string(),
+  tag: z24.string()
+});
+var monthlyTransactionSummarySchema = z24.record(
+  z24.string(),
+  z24.object({
+    spends: z24.array(transactionSchema2),
+    incomes: z24.array(transactionSchema2),
+    details: z24.object({
+      totalSpends: z24.number(),
+      totalIncomes: z24.number(),
+      overallBalance: z24.number()
+    })
+  })
+);
+var getAllTransactionsWithMonthRoute = async (app2) => {
+  app2.get(
+    "/with-month",
+    {
+      schema: {
+        summary: "Get all transactions from a specific range of months",
+        tags: ["Transactions"],
+        operationId: "getAllTransactionsWithMonth",
+        querystring: z24.object({
+          month: z24.string().optional().refine(
+            (val) => val === void 0 || Number(val) >= 1 && Number(val) <= 12,
+            {
+              message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
+            }
+          ).transform((val) => {
+            const num = Number(val);
+            return Number.isNaN(num) ? void 0 : num;
+          }),
+          year: z24.string().optional().refine(
+            (val) => {
+              if (!val) return true;
+              const num = Number(val);
+              return !Number.isNaN(num) && num > 0;
+            },
+            {
+              message: "O ano deve ser um n\xFAmero v\xE1lido."
+            }
+          ).transform((val) => {
+            const num = Number(val);
+            return Number.isNaN(num) ? void 0 : num;
+          })
+        }),
+        response: {
+          [200 /* OK */]: monthlyTransactionSummarySchema,
+          [404 /* NOT_FOUND */]: z24.object({
+            name: z24.string(),
+            message: z24.string()
+          }),
+          [400 /* BAD_REQUEST */]: z24.object({
+            name: z24.string(),
+            message: z24.string()
+          })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { month, year } = request.query;
+      const transactionsController = new TransactionsController(db);
+      const [error, data] = await catchError(
+        transactionsController.getAllTransactionsWithMonth({ month, year })
+      );
+      if (error) {
+        return reply.status(error.statusCode).send({
+          name: error.name,
+          message: error.message
+        });
+      }
+      return reply.status(200 /* OK */).send(data);
+    }
+  );
+};
+
+// src/routes/transactions/getTransactionRoute.ts
+import z25 from "zod";
 var getTransactionRoute = async (app2) => {
   app2.get(
     "",
@@ -2331,21 +2515,21 @@ var getTransactionRoute = async (app2) => {
         summary: "Get a transaction by id",
         tags: ["Transactions"],
         operationId: "getTransactionById",
-        querystring: z24.object({
-          id: z24.string()
+        querystring: z25.object({
+          id: z25.string()
         }),
         response: {
-          [200 /* OK */]: z24.object({
-            id: z24.number(),
-            createdAt: z24.date().nullable(),
-            isSpend: z24.boolean(),
-            amount: z24.number(),
-            paymentType: z24.string(),
-            tag: z24.string()
+          [200 /* OK */]: z25.object({
+            id: z25.number(),
+            createdAt: z25.date().nullable(),
+            isSpend: z25.boolean(),
+            amount: z25.number(),
+            paymentType: z25.string(),
+            tag: z25.string()
           }),
-          [404 /* NOT_FOUND */]: z24.object({
-            name: z24.string(),
-            message: z24.string()
+          [404 /* NOT_FOUND */]: z25.object({
+            name: z25.string(),
+            message: z25.string()
           })
         }
       }
@@ -2376,6 +2560,7 @@ var routes4 = [
   getAllTransactionsPaymentTypeRoute,
   getAllTransactionsTagRoute,
   getAllTransactionsByMonthRoute,
+  getAllTransactionsWithMonthRoute,
   createTransactionRoute
 ];
 var prefix4 = "/transactions";
