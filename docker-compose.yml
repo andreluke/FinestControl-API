@@ -1,0 +1,10 @@
+services:
+  service-pg-finestcontrol:
+    container_name: finestcontrol-postgres
+    image: bitnami/postgresql
+    ports:
+      - '5433:5432'
+    environment:
+      - POSTGRES_USER=docker
+      - POSTGRES_PASSWORD=docker
+      - POSTGRES_DB=FinestControl
