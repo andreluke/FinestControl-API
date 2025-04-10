@@ -31,7 +31,8 @@ export const getAllTransactionsTagRoute: FastifyPluginAsyncZod = async app => {
                 isSpend: z.boolean(),
                 amount: z.number(),
                 paymentType: z.string(),
-                tag: z.string(),
+                tagName: z.string(),
+                tagColor: z.string(),
               })
             ),
           }),

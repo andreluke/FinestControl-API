@@ -3,7 +3,8 @@ export type TransactionList = {
   paymentType: string
   amount: number
   createdAt: Date | null
-  tag: string
+  tagName: string
+  tagColor: string
   isSpend: boolean
 }
 

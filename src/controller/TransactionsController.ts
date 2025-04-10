@@ -35,7 +35,8 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         isSpend: transactions.isSpend,
@@ -77,7 +78,8 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         isSpend: transactions.isSpend,
@@ -122,7 +124,8 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         isSpend: transactions.isSpend,
@@ -153,7 +156,8 @@ export class TransactionsController {
         paymentType: paymentType.name,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         isSpend: transactions.isSpend,
       })
       .from(transactions)
@@ -190,7 +194,8 @@ export class TransactionsController {
         paymentType: paymentType.name,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         isSpend: transactions.isSpend,
       })
       .from(transactions)
@@ -225,7 +230,8 @@ export class TransactionsController {
         paymentType: paymentType.name,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
-        tag: tags.name,
+        tagName: tags.name,
+        tagColor: tags.color,
         isSpend: transactions.isSpend,
       })
       .from(transactions)
