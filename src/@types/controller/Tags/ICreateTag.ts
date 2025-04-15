@@ -1,5 +1,5 @@
 export interface CreateTagParams {
   name: string
-  color?: string | null
+  color: string
   description?: string | null
 }

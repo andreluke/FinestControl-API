@@ -1,4 +1,4 @@
-import { and, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm'
 import type {
   CreateTagParams,
   GetTagParams,
@@ -39,7 +39,11 @@ export class TagsController {
   }
 
   async getAllTags() {
-    const query = this.db.select().from(tags).where(this.notRemovedCondition())
+    const query = this.db
+      .select()
+      .from(tags)
+      .where(this.notRemovedCondition())
+      .orderBy(desc(tags.createdAt))
 
     const tagsList = await query
 
@@ -61,7 +65,7 @@ export class TagsController {
       throw new TagAlreadyExistsError()
     }
 
-    const normalizedColor = color ? new HexColor(color).toString() : null
+    const normalizedColor = new HexColor(color).toString()
 
     const query = this.db
       .insert(tags)
@@ -74,7 +78,7 @@ export class TagsController {
   }
 
   async updateTag({ tagId, color, description, name }: UpdateTagParams) {
-    const normalizedColor = color ? new HexColor(color).toString() : null
+    const normalizedColor = color ? new HexColor(color).toString() : undefined
 
     const query = this.db
       .update(tags)

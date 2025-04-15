@@ -19,6 +19,7 @@ export const updatePaymentTypeRoute: FastifyPluginAsyncZod = async app => {
           id: z.number(),
           name: z.string().optional(),
           description: z.string().optional(),
+          icon: z.string().optional(),
         }),
         response: {
           [StatusCodes.OK]: updatePaymentTypeSchema,
@@ -30,7 +31,7 @@ export const updatePaymentTypeRoute: FastifyPluginAsyncZod = async app => {
       },
     },
     async (request, reply) => {
-      const { id, name, description } = request.body
+      const { id, name, description, icon } = request.body
       const paymentTypeController = new PaymentTypeController(db)
 
       const [error, data] = await catchError(
@@ -38,6 +39,7 @@ export const updatePaymentTypeRoute: FastifyPluginAsyncZod = async app => {
           typeId: id,
           name,
           description,
+          icon,
         }),
         new PaymentTypeNotFoundError()
       )

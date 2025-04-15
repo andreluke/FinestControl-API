@@ -1,6 +1,7 @@
 export type TransactionList = {
   id: number
   paymentType: string
+  paymentTypeIcon: string
   amount: number
   createdAt: Date | null
   tagName: string

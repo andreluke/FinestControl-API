@@ -20,7 +20,7 @@ export const createTagRoute: FastifyPluginAsyncZod = async app => {
         operationId: 'createTag',
         body: z.object({
           name: z.string(),
-          color: z.string().optional(),
+          color: z.string(),
           description: z.string().optional(),
         }),
         response: {
@@ -42,8 +42,8 @@ export const createTagRoute: FastifyPluginAsyncZod = async app => {
           color,
           description,
         }),
-        new TagAlreadyExistsError(),
-        new TagInvalidColor(color ?? '')
+        new TagAlreadyExistsError()
+        // new TagInvalidColor(color ?? '')
       )
 
       if (error) {

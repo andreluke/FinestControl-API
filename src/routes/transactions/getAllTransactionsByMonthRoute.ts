@@ -54,6 +54,7 @@ export const getAllTransactionsByMonthRoute: FastifyPluginAsyncZod =
                     isSpend: z.boolean(),
                     amount: z.number(),
                     paymentType: z.string(),
+                    paymentTypeIcon: z.string(),
                     tagName: z.string(),
                     tagColor: z.string(),
                   })
@@ -65,6 +66,7 @@ export const getAllTransactionsByMonthRoute: FastifyPluginAsyncZod =
                     isSpend: z.boolean(),
                     amount: z.number(),
                     paymentType: z.string(),
+                    paymentTypeIcon: z.string(),
                     tagName: z.string(),
                     tagColor: z.string(),
                   })

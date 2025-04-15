@@ -16,7 +16,16 @@ export const getPaymentTypesRoute: FastifyPluginAsyncZod = async app => {
         operationId: 'getAllPaymentTypes',
         response: {
           [StatusCodes.OK]: z.object({
-            paymentTypes: z.array(selectPaymentTypeSchema),
+            paymentTypes: z.array(
+              z.object({
+                id: z.number(),
+                name: z.string(),
+                description: z.string().nullable(),
+                icon: z.string(),
+                createdAt: z.date().nullable(),
+                updatedAt: z.date().nullable(),
+              })
+            ),
           }),
           [StatusCodes.INTERNAL_SERVER_ERROR]: z.object({
             name: z.string(),

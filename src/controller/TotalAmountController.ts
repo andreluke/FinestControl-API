@@ -23,7 +23,7 @@ export class TotalAmountController {
 
   async createAmount({ amount, isSpend, transactionId }: CreateAmountParams) {
     const totalAmountModel = new TotalAmountModel(this.db, totalAmount)
-    const { total } = await this.getAmount()
+    const { total } = (await this.getAmount()) ?? 0
     const lastAmount = total ?? 0
     const newTotal = isSpend ? lastAmount - amount : lastAmount + amount
 

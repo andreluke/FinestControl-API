@@ -39,8 +39,12 @@ export class PaymentTypeController {
     return newPaymentType
   }
 
-  async createPaymentType({ name, description }: CreatePaymentTypeParams) {
-    const paymentTypeExists = await this.getPaymentType({ name })
+  async createPaymentType({
+    name,
+    description,
+    icon,
+  }: CreatePaymentTypeParams) {
+    const paymentTypeExists = await this.getPaymentType({ name, search: true })
 
     if (paymentTypeExists) {
       throw new PaymentTypeAlreadyExistsError()
@@ -48,7 +52,7 @@ export class PaymentTypeController {
 
     const [newPaymentType] = await this.db
       .insert(paymentType)
-      .values({ name, description })
+      .values({ name, description, icon })
       .returning()
 
     return newPaymentType
@@ -58,8 +62,9 @@ export class PaymentTypeController {
     typeId,
     name,
     description,
+    icon,
   }: UpdatePaymentTypeParams) {
-    if (!name && !description) {
+    if (!name && !description && !icon) {
       throw new PaymentTypeMissingParamsError()
     }
 
@@ -68,6 +73,7 @@ export class PaymentTypeController {
       .set({
         name,
         description,
+        icon,
         updatedAt: new Date(),
       })
       .where(and(this.notRemovedCondition(), eq(paymentType.id, typeId)))

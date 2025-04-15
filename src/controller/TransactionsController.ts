@@ -154,6 +154,7 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
+        paymentTypeIcon: paymentType.icon,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         tagName: tags.name,
@@ -192,6 +193,7 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
+        paymentTypeIcon: paymentType.icon,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         tagName: tags.name,
@@ -228,6 +230,7 @@ export class TransactionsController {
       .select({
         id: transactions.id,
         paymentType: paymentType.name,
+        paymentTypeIcon: paymentType.icon,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         tagName: tags.name,

@@ -18,6 +18,7 @@ export const createPaymentTypeRoute: FastifyPluginAsyncZod = async app => {
         body: z.object({
           name: z.string(),
           description: z.string().optional(),
+          icon: z.string(),
         }),
         response: {
           [StatusCodes.CREATED]: insertPaymentTypeSchema,
@@ -29,13 +30,14 @@ export const createPaymentTypeRoute: FastifyPluginAsyncZod = async app => {
       },
     },
     async (request, reply) => {
-      const { name, description } = request.body
+      const { name, description, icon } = request.body
       const paymentTypeController = new PaymentTypeController(db)
 
       const [error, data] = await catchError(
         paymentTypeController.createPaymentType({
           name,
           description,
+          icon,
         }),
         new PaymentTypeAlreadyExistsError()
       )

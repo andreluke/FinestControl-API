@@ -24,7 +24,14 @@ export const getPaymentTypeRoute: FastifyPluginAsyncZod = async app => {
         }),
 
         response: {
-          [StatusCodes.OK]: selectPaymentTypeSchema,
+          [StatusCodes.OK]: z.object({
+            id: z.number(),
+            name: z.string(),
+            description: z.string().nullable(),
+            icon: z.string(),
+            createdAt: z.date().nullable(),
+            updatedAt: z.date().nullable(),
+          }),
           [StatusCodes.NOT_FOUND]: z.object({
             name: z.string(),
             message: z.string(),
