@@ -3,5 +3,5 @@ export interface UpdateTagParams {
   name?: string
   color: string
   description?: string
-  monthGoal: number
+  monthGoal?: number
 }

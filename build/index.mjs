@@ -1522,13 +1522,13 @@ var TagsController = class {
         throw new TagAlreadyExistsError();
       }
     }
-    const goal = new Money(monthGoal);
+    const goal = monthGoal ? new Money(monthGoal) : void 0;
     const normalizedColor = color ? new HexColor(color).toString() : void 0;
     const query = this.db.update(tags).set({
       color: normalizedColor,
       description,
       name,
-      monthGoal: goal.getCents(),
+      monthGoal: goal ? goal.getCents() : void 0,
       updatedAt: /* @__PURE__ */ new Date()
     }).where(and2(this.notRemovedCondition(), eq2(tags.id, tagId)));
     const [tag] = await query.returning();
@@ -2144,7 +2144,7 @@ var updateTagRoute = async (app2) => {
           name: z20.string().optional(),
           color: z20.string(),
           description: z20.string().optional(),
-          monthGoal: z20.number()
+          monthGoal: z20.number().optional()
         }),
         response: {
           [200 /* OK */]: updateTagSchema,

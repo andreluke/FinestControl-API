@@ -203,7 +203,7 @@ export class TagsController {
       }
     }
 
-    const goal = new Money(monthGoal)
+    const goal = monthGoal ? new Money(monthGoal) : undefined
 
     const normalizedColor = color ? new HexColor(color).toString() : undefined
 
@@ -213,7 +213,7 @@ export class TagsController {
         color: normalizedColor,
         description,
         name,
-        monthGoal: goal.getCents(),
+        monthGoal: goal ? goal.getCents() : undefined,
         updatedAt: new Date(),
       })
       .where(and(this.notRemovedCondition(), eq(tags.id, tagId)))

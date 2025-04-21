@@ -20,7 +20,7 @@ export const updateTagRoute: FastifyPluginAsyncZod = async app => {
           name: z.string().optional(),
           color: z.string(),
           description: z.string().optional(),
-          monthGoal: z.number(),
+          monthGoal: z.number().optional(),
         }),
         response: {
           [StatusCodes.OK]: updateTagSchema,
