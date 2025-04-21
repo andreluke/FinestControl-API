@@ -1,0 +1,1 @@
+ALTER TABLE "tags" ADD COLUMN "month_goal" integer DEFAULT 0 NOT NULL;

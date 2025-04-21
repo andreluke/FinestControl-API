@@ -2,6 +2,7 @@ import { registerPrefix } from '#/utils/registerPrefix'
 import { createPaymentTypeRoute } from './createPaymentTypeRoute'
 import { getPaymentTypesRoute } from './getAllPaymentTypesRoute'
 import { getRemovedPaymentTypesRoute } from './getAllRemovedPaymentTypesRoute'
+import { getMostUsedPaymentTypesRoute } from './getMostUsedPaymentTypes'
 import { getPaymentTypeRoute } from './getPaymentTypeRoute'
 import { removePaymentTypeRoute } from './removePaymentTypeRoute'
 import { restorePaymentTypeRoute } from './restorePaymentType'
@@ -11,6 +12,7 @@ const routes = [
   getPaymentTypesRoute,
   getRemovedPaymentTypesRoute,
   getPaymentTypeRoute,
+  getMostUsedPaymentTypesRoute,
   createPaymentTypeRoute,
   updatePaymentTypeRoute,
   removePaymentTypeRoute,

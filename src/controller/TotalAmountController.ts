@@ -21,6 +21,18 @@ export class TotalAmountController {
     return totalAmountValue
   }
 
+  async getRoughAmount() {
+    const [roughAmountValue] = await this.db
+      .select({
+        total: totalAmount.total,
+      })
+      .from(totalAmount)
+      .orderBy(desc(totalAmount.createdAt))
+      .limit(1)
+
+    return roughAmountValue.total ?? 0
+  }
+
   async createAmount({ amount, isSpend, transactionId }: CreateAmountParams) {
     const totalAmountModel = new TotalAmountModel(this.db, totalAmount)
     const { total } = (await this.getAmount()) ?? 0

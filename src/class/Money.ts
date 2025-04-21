@@ -24,14 +24,12 @@ export class Money {
     }).format(this.getReais())
   }
 
-  add(other: Money): this {
-    this.cents += other.getCents()
-    return this
+  add(other: Money): Money {
+    return new Money((this.cents + other.getCents()) / 100)
   }
 
-  subtract(other: Money): this {
-    this.cents -= other.getCents()
-    return this
+  subtract(other: Money): Money {
+    return new Money((this.cents - other.getCents()) / 100)
   }
 
   multiply(factor: number): this {

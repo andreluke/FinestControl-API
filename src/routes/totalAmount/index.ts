@@ -1,8 +1,9 @@
 import { registerPrefix } from '#/utils/registerPrefix'
 import { getLastAmountRoute } from './getAmountRoute'
 import { getMonthAmountRoute } from './getMonthAmountRoute'
+import { getRoughAmountRoute } from './getRoughAmountROute'
 
-const routes = [getLastAmountRoute, getMonthAmountRoute]
+const routes = [getLastAmountRoute, getMonthAmountRoute, getRoughAmountRoute]
 
 const prefix = '/total-amount'
 

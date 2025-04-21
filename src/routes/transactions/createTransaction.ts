@@ -21,6 +21,7 @@ export const createTransactionRoute: FastifyPluginAsyncZod = async app => {
           isSpend: z.boolean(),
           paymentTypeId: z.number(),
           tagId: z.number(),
+          createdAt: z.string().optional(),
         }),
         response: {
           [StatusCodes.OK]: insertTransactionSchema,
@@ -32,8 +33,16 @@ export const createTransactionRoute: FastifyPluginAsyncZod = async app => {
       },
     },
     async (request, reply) => {
-      const { amount, isSpend, paymentTypeId, tagId } = request.body
+      const {
+        amount,
+        isSpend,
+        paymentTypeId,
+        tagId,
+        createdAt: createdAtStr,
+      } = request.body
       const transactionsController = new TransactionsController(db)
+
+      const createdAt = createdAtStr ? new Date(createdAtStr) : undefined
 
       const [error, data] = await catchError(
         transactionsController.createTransaction({
@@ -41,6 +50,7 @@ export const createTransactionRoute: FastifyPluginAsyncZod = async app => {
           isSpend,
           paymentTypeId,
           tagId,
+          createdAt,
         }),
         new TagNotFoundError(),
         new PaymentTypeNotFoundError()

@@ -557,7 +557,8 @@ async function logger(app2) {
 // src/config/plugins.ts
 function registerPlugins(app2) {
   app2.register(fastifyCors, {
-    origin: [portSettings.BASE_URL, portSettings.WEB_URL]
+    origin: [portSettings.BASE_URL, portSettings.WEB_URL],
+    methods: ["*"]
   });
   app2.register(fastifySwagger, {
     openapi: {
@@ -602,12 +603,12 @@ var registerPrefix = (routes6, prefix5) => {
 import z3 from "zod";
 
 // src/controller/PaymentTypeController.ts
-import { and, desc, eq, isNotNull, isNull } from "drizzle-orm";
+import { and, count, desc, eq, gte, isNotNull, isNull, lte } from "drizzle-orm";
 
 // src/drizzle/schemas/transactions.ts
 import {
   boolean,
-  integer,
+  integer as integer2,
   pgTable as pgTable3,
   serial as serial3,
   timestamp as timestamp3
@@ -617,7 +618,8 @@ import {
 import { pgTable, serial, timestamp, varchar } from "drizzle-orm/pg-core";
 var paymentType = pgTable("payment_type", {
   id: serial("id").primaryKey(),
-  name: varchar("name", { length: 255 }).notNull().unique(),
+  name: varchar("name", { length: 255 }).notNull(),
+  icon: varchar("icon", { length: 255 }).notNull(),
   description: varchar("description", { length: 255 }),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at"),
@@ -625,12 +627,19 @@ var paymentType = pgTable("payment_type", {
 });
 
 // src/drizzle/schemas/tags.ts
-import { pgTable as pgTable2, serial as serial2, timestamp as timestamp2, varchar as varchar2 } from "drizzle-orm/pg-core";
+import {
+  integer,
+  pgTable as pgTable2,
+  serial as serial2,
+  timestamp as timestamp2,
+  varchar as varchar2
+} from "drizzle-orm/pg-core";
 var tags = pgTable2("tags", {
   id: serial2("id").primaryKey().notNull(),
-  name: varchar2("name", { length: 255 }).notNull().unique(),
+  name: varchar2("name", { length: 255 }).notNull(),
   color: varchar2("color", { length: 255 }).notNull(),
   description: varchar2("description", { length: 255 }),
+  monthGoal: integer("month_goal").notNull().default(0),
   createdAt: timestamp2("created_at").defaultNow(),
   updatedAt: timestamp2("updated_at"),
   removedAt: timestamp2("removed_at")
@@ -639,7 +648,7 @@ var tags = pgTable2("tags", {
 // src/drizzle/schemas/transactions.ts
 var transactions = pgTable3("transactions", {
   id: serial3("id").primaryKey(),
-  amount: integer("amount").notNull(),
+  amount: integer2("amount").notNull(),
   createdAt: timestamp3("created_at").defaultNow(),
   isSpend: boolean("is_spend").notNull(),
   paymentTypeId: serial3("payment_type_id").references(() => paymentType.id, {
@@ -654,11 +663,11 @@ var transactions = pgTable3("transactions", {
 });
 
 // src/drizzle/schemas/totalAmount.ts
-import { integer as integer2, pgTable as pgTable4, serial as serial4, timestamp as timestamp4 } from "drizzle-orm/pg-core";
+import { integer as integer3, pgTable as pgTable4, serial as serial4, timestamp as timestamp4 } from "drizzle-orm/pg-core";
 var totalAmount = pgTable4("total_amount", {
   id: serial4("id").primaryKey(),
-  total: integer2("total_amount").notNull(),
-  lastAmount: integer2("last_amount"),
+  total: integer3("total_amount").notNull(),
+  lastAmount: integer3("last_amount"),
   createdAt: timestamp4("created_at").defaultNow(),
   lastTransaction: serial4("last_spend").references(() => transactions.id, {
     onDelete: "set null",
@@ -736,31 +745,83 @@ var PaymentTypeController = class {
     }
     return newPaymentType;
   }
-  async createPaymentType({ name, description }) {
-    const paymentTypeExists = await this.getPaymentType({ name });
+  async createPaymentType({
+    name,
+    description,
+    icon
+  }) {
+    const paymentTypeExists = await this.getPaymentType({ name, search: true });
     if (paymentTypeExists) {
       throw new PaymentTypeAlreadyExistsError();
     }
-    const [newPaymentType] = await this.db.insert(paymentType).values({ name, description }).returning();
+    const [newPaymentType] = await this.db.insert(paymentType).values({ name, description, icon }).returning();
     return newPaymentType;
   }
   async updatePaymentType({
     typeId,
     name,
-    description
+    description,
+    icon
   }) {
-    if (!name && !description) {
+    if (!name && !description && !icon) {
       throw new PaymentTypeMissingParamsError();
+    }
+    if (name) {
+      const paymentTypeExists = await this.getPaymentType({
+        name,
+        search: true
+      });
+      if (paymentTypeExists && paymentTypeExists.id !== typeId) {
+        throw new PaymentTypeAlreadyExistsError();
+      }
     }
     const [newPaymentType] = await this.db.update(paymentType).set({
       name,
       description,
+      icon,
       updatedAt: /* @__PURE__ */ new Date()
     }).where(and(this.notRemovedCondition(), eq(paymentType.id, typeId))).returning();
     if (!newPaymentType) {
       throw new PaymentTypeNotFoundError();
     }
     return newPaymentType;
+  }
+  async getMostUsedPaymentType({ limit }) {
+    const now = /* @__PURE__ */ new Date();
+    const monthStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const monthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+    const query = this.db.select({
+      id: paymentType.id,
+      name: paymentType.name,
+      icon: paymentType.icon,
+      usageCount: count(transactions.id).as("usage_count")
+    }).from(paymentType).leftJoin(transactions, eq(paymentType.id, transactions.paymentTypeId)).groupBy(paymentType.id, paymentType.name).orderBy(desc(count(transactions.id))).where(
+      and(
+        gte(transactions.createdAt, monthStart),
+        lte(transactions.createdAt, monthEnd)
+      )
+    ).limit(limit ?? 10);
+    const tagsList = await query;
+    const filteredTagsList = tagsList.filter((tag) => {
+      return tag.usageCount > 0;
+    });
+    return filteredTagsList;
   }
   async removePaymentType({ typeId }) {
     const [newPaymentType] = await this.db.update(paymentType).set({
@@ -849,7 +910,8 @@ var createPaymentTypeRoute = async (app2) => {
         operationId: "createPaymentType",
         body: z3.object({
           name: z3.string(),
-          description: z3.string().optional()
+          description: z3.string().optional(),
+          icon: z3.string()
         }),
         response: {
           [201 /* CREATED */]: insertPaymentTypeSchema,
@@ -861,12 +923,13 @@ var createPaymentTypeRoute = async (app2) => {
       }
     },
     async (request, reply) => {
-      const { name, description } = request.body;
+      const { name, description, icon } = request.body;
       const paymentTypeController = new PaymentTypeController(db);
       const [error, data] = await catchError(
         paymentTypeController.createPaymentType({
           name,
-          description
+          description,
+          icon
         }),
         new PaymentTypeAlreadyExistsError()
       );
@@ -893,7 +956,16 @@ var getPaymentTypesRoute = async (app2) => {
         operationId: "getAllPaymentTypes",
         response: {
           [200 /* OK */]: z4.object({
-            paymentTypes: z4.array(selectPaymentTypeSchema)
+            paymentTypes: z4.array(
+              z4.object({
+                id: z4.number(),
+                name: z4.string(),
+                description: z4.string().nullable(),
+                icon: z4.string(),
+                createdAt: z4.date().nullable(),
+                updatedAt: z4.date().nullable()
+              })
+            )
           }),
           [500 /* INTERNAL_SERVER_ERROR */]: z4.object({
             name: z4.string(),
@@ -930,7 +1002,16 @@ var getRemovedPaymentTypesRoute = async (app2) => {
         operationId: "getAllRemovedPaymentTypes",
         response: {
           [200 /* OK */]: z5.object({
-            paymentTypes: z5.array(selectPaymentTypeSchema)
+            paymentTypes: z5.array(
+              z5.object({
+                id: z5.number(),
+                name: z5.string(),
+                description: z5.string().nullable(),
+                icon: z5.string(),
+                createdAt: z5.date().nullable(),
+                updatedAt: z5.date().nullable()
+              })
+            )
           }),
           [500 /* INTERNAL_SERVER_ERROR */]: z5.object({
             name: z5.string(),
@@ -955,8 +1036,55 @@ var getRemovedPaymentTypesRoute = async (app2) => {
   );
 };
 
-// src/routes/paymentType/getPaymentTypeRoute.ts
+// src/routes/paymentType/getMostUsedPaymentTypes.ts
 import z6 from "zod";
+var getMostUsedPaymentTypesRoute = async (app2) => {
+  app2.get(
+    "/most-used",
+    {
+      schema: {
+        summary: "Get most used payment types",
+        tags: ["Payment Types"],
+        operationId: "getMostUsedPaymentTypes",
+        querystring: z6.object({
+          limit: z6.string().optional()
+        }),
+        response: {
+          [200 /* OK */]: z6.array(
+            z6.object({
+              id: z6.number(),
+              name: z6.string(),
+              icon: z6.string(),
+              usageCount: z6.number()
+            })
+          ),
+          [500 /* INTERNAL_SERVER_ERROR */]: z6.object({
+            name: z6.string(),
+            message: z6.string()
+          })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { limit } = request.query;
+      const limitNumber = limit ? Number.parseInt(limit) : void 0;
+      const paymentTypeController = new PaymentTypeController(db);
+      const [error, data] = await catchError(
+        paymentTypeController.getMostUsedPaymentType({ limit: limitNumber })
+      );
+      if (error) {
+        return reply.status(error.statusCode).send({
+          name: error.name,
+          message: error.message
+        });
+      }
+      return reply.status(200 /* OK */).send(data);
+    }
+  );
+};
+
+// src/routes/paymentType/getPaymentTypeRoute.ts
+import z7 from "zod";
 var getPaymentTypeRoute = async (app2) => {
   app2.get(
     "",
@@ -965,19 +1093,26 @@ var getPaymentTypeRoute = async (app2) => {
         summary: "Get Payment Type by id or name",
         tags: ["Payment Types"],
         operationId: "getPaymentType",
-        querystring: z6.object({
-          id: z6.string().optional(),
-          name: z6.string().optional()
+        querystring: z7.object({
+          id: z7.string().optional(),
+          name: z7.string().optional()
         }),
         response: {
-          [200 /* OK */]: selectPaymentTypeSchema,
-          [404 /* NOT_FOUND */]: z6.object({
-            name: z6.string(),
-            message: z6.string()
+          [200 /* OK */]: z7.object({
+            id: z7.number(),
+            name: z7.string(),
+            description: z7.string().nullable(),
+            icon: z7.string(),
+            createdAt: z7.date().nullable(),
+            updatedAt: z7.date().nullable()
           }),
-          [400 /* BAD_REQUEST */]: z6.object({
-            name: z6.string(),
-            message: z6.string()
+          [404 /* NOT_FOUND */]: z7.object({
+            name: z7.string(),
+            message: z7.string()
+          }),
+          [400 /* BAD_REQUEST */]: z7.object({
+            name: z7.string(),
+            message: z7.string()
           })
         }
       }
@@ -1006,7 +1141,7 @@ var getPaymentTypeRoute = async (app2) => {
 };
 
 // src/routes/paymentType/removePaymentTypeRoute.ts
-import z7 from "zod";
+import z8 from "zod";
 var removePaymentTypeRoute = async (app2) => {
   app2.patch(
     "/remove/:id",
@@ -1015,14 +1150,14 @@ var removePaymentTypeRoute = async (app2) => {
         summary: "Remove a Payment Type",
         tags: ["Payment Types"],
         operationId: "removePaymentType",
-        params: z7.object({
-          id: z7.string()
+        params: z8.object({
+          id: z8.string()
         }),
         response: {
           [200 /* OK */]: updatePaymentTypeSchema,
-          [404 /* NOT_FOUND */]: z7.object({
-            name: z7.string(),
-            message: z7.string()
+          [404 /* NOT_FOUND */]: z8.object({
+            name: z8.string(),
+            message: z8.string()
           })
         }
       }
@@ -1049,7 +1184,7 @@ var removePaymentTypeRoute = async (app2) => {
 };
 
 // src/routes/paymentType/restorePaymentType.ts
-import z8 from "zod";
+import z9 from "zod";
 var restorePaymentTypeRoute = async (app2) => {
   app2.patch(
     "/restore/:id",
@@ -1057,15 +1192,15 @@ var restorePaymentTypeRoute = async (app2) => {
       schema: {
         summary: "Restore a Payment Type",
         tags: ["Payment Types"],
-        operationId: "removePaymentType",
-        params: z8.object({
-          id: z8.string()
+        operationId: "restorePaymentType",
+        params: z9.object({
+          id: z9.string()
         }),
         response: {
           [200 /* OK */]: updatePaymentTypeSchema,
-          [404 /* NOT_FOUND */]: z8.object({
-            name: z8.string(),
-            message: z8.string()
+          [404 /* NOT_FOUND */]: z9.object({
+            name: z9.string(),
+            message: z9.string()
           })
         }
       }
@@ -1092,7 +1227,7 @@ var restorePaymentTypeRoute = async (app2) => {
 };
 
 // src/routes/paymentType/updatePaymentTypeRoute.ts
-import z9 from "zod";
+import z10 from "zod";
 var updatePaymentTypeRoute = async (app2) => {
   app2.patch(
     "/update",
@@ -1101,28 +1236,30 @@ var updatePaymentTypeRoute = async (app2) => {
         summary: "Update Payment Type",
         tags: ["Payment Types"],
         operationId: "updatePaymentType",
-        body: z9.object({
-          id: z9.number(),
-          name: z9.string().optional(),
-          description: z9.string().optional()
+        body: z10.object({
+          id: z10.number(),
+          name: z10.string().optional(),
+          description: z10.string().optional(),
+          icon: z10.string().optional()
         }),
         response: {
           [200 /* OK */]: updatePaymentTypeSchema,
-          [404 /* NOT_FOUND */]: z9.object({
-            name: z9.string(),
-            message: z9.string()
+          [404 /* NOT_FOUND */]: z10.object({
+            name: z10.string(),
+            message: z10.string()
           })
         }
       }
     },
     async (request, reply) => {
-      const { id, name, description } = request.body;
+      const { id, name, description, icon } = request.body;
       const paymentTypeController = new PaymentTypeController(db);
       const [error, data] = await catchError(
         paymentTypeController.updatePaymentType({
           typeId: id,
           name,
-          description
+          description,
+          icon
         }),
         new PaymentTypeNotFoundError()
       );
@@ -1142,6 +1279,7 @@ var routes = [
   getPaymentTypesRoute,
   getRemovedPaymentTypesRoute,
   getPaymentTypeRoute,
+  getMostUsedPaymentTypesRoute,
   createPaymentTypeRoute,
   updatePaymentTypeRoute,
   removePaymentTypeRoute,
@@ -1151,10 +1289,21 @@ var prefix = "/payment-type";
 var paymentTypeRoutes = registerPrefix(routes, prefix);
 
 // src/routes/tags/createTagRoute.ts
-import z10 from "zod";
+import z11 from "zod";
 
 // src/controller/TagsController.ts
-import { and as and2, eq as eq2, isNotNull as isNotNull2, isNull as isNull2 } from "drizzle-orm";
+import {
+  and as and2,
+  count as count2,
+  desc as desc2,
+  eq as eq2,
+  gte as gte2,
+  isNotNull as isNotNull2,
+  isNull as isNull2,
+  lte as lte2,
+  sql,
+  sum
+} from "drizzle-orm";
 
 // src/errors/custom/TagError.ts
 var TagError = class extends CustomError {
@@ -1215,12 +1364,112 @@ var HexColor = class _HexColor {
   }
 };
 
+// src/class/Money.ts
+var Money = class _Money {
+  cents;
+  constructor(amount) {
+    this.cents = Math.round(amount * 100);
+  }
+  static fromCents(cents) {
+    return new _Money(cents / 100);
+  }
+  getCents() {
+    return this.cents;
+  }
+  getReais() {
+    return this.cents / 100;
+  }
+  format(locale = "pt-BR", currency = "BRL") {
+    return new Intl.NumberFormat(locale, {
+      style: "currency",
+      currency
+    }).format(this.getReais());
+  }
+  add(other) {
+    return new _Money((this.cents + other.getCents()) / 100);
+  }
+  subtract(other) {
+    return new _Money((this.cents - other.getCents()) / 100);
+  }
+  multiply(factor) {
+    this.cents = Math.round(this.cents * factor);
+    return this;
+  }
+  equals(other) {
+    return this.cents === other.getCents();
+  }
+};
+
 // src/controller/TagsController.ts
 var TagsController = class {
   constructor(db2) {
     this.db = db2;
   }
   notRemovedCondition = () => isNull2(tags.removedAt);
+  async getTagsWithExpenses({
+    month,
+    year: baseYear
+  }) {
+    const year = baseYear ?? (/* @__PURE__ */ new Date()).getFullYear();
+    const monthStart = new Date(year, month - 1, 1);
+    const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
+    const query = this.db.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      monthGoal: tags.monthGoal,
+      total: sum(transactions.amount).as("total")
+    }).from(tags).leftJoin(transactions, eq2(tags.id, transactions.tagId)).where(
+      and2(
+        gte2(transactions.createdAt, monthStart),
+        lte2(transactions.createdAt, monthEnd)
+      )
+    ).groupBy(tags.id).having(sql`bool_and(${transactions.isSpend})`).orderBy(desc2(sum(transactions.amount)));
+    const result = await query;
+    const spends = result.map((tag) => ({
+      ...tag,
+      total: Number.parseInt(tag.total ?? "0")
+    }));
+    return spends;
+  }
+  async getMostUsedTags({ limit }) {
+    const now = /* @__PURE__ */ new Date();
+    const monthStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    );
+    const monthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    );
+    const query = this.db.select({
+      id: tags.id,
+      name: tags.name,
+      color: tags.color,
+      monthGoal: tags.monthGoal,
+      usageCount: count2(transactions.id).as("usage_count")
+    }).from(tags).leftJoin(transactions, eq2(tags.id, transactions.tagId)).groupBy(tags.id, tags.name).orderBy(desc2(count2(transactions.id))).where(
+      and2(
+        gte2(transactions.createdAt, monthStart),
+        lte2(transactions.createdAt, monthEnd)
+      )
+    ).limit(limit ?? 10);
+    const tagsList = await query;
+    const filteredTagsList = tagsList.filter((tag) => {
+      return tag.usageCount > 0;
+    });
+    return filteredTagsList;
+  }
   async getTag({ tagId, name, search }) {
     if (!name && !tagId) {
       throw new MissingTagParamsError();
@@ -1235,7 +1484,7 @@ var TagsController = class {
     return tag;
   }
   async getAllTags() {
-    const query = this.db.select().from(tags).where(this.notRemovedCondition());
+    const query = this.db.select().from(tags).where(this.notRemovedCondition()).orderBy(desc2(tags.createdAt));
     const tagsList = await query;
     return tagsList;
   }
@@ -1244,19 +1493,44 @@ var TagsController = class {
     const tagsList = await query;
     return tagsList;
   }
-  async createTag({ name, color, description }) {
+  async createTag({ name, color, description, monthGoal }) {
     const tagExists = await this.getTag({ name, search: true });
     if (tagExists) {
       throw new TagAlreadyExistsError();
     }
-    const normalizedColor = color ? new HexColor(color).toString() : null;
-    const query = this.db.insert(tags).values({ name, color: normalizedColor, description }).returning();
+    const goal = new Money(monthGoal);
+    const normalizedColor = new HexColor(color).toString();
+    const query = this.db.insert(tags).values({
+      name,
+      color: normalizedColor,
+      description,
+      monthGoal: goal.getCents()
+    }).returning();
     const [tag] = await query;
     return tag;
   }
-  async updateTag({ tagId, color, description, name }) {
-    const normalizedColor = color ? new HexColor(color).toString() : null;
-    const query = this.db.update(tags).set({ color: normalizedColor, description, name }).where(and2(this.notRemovedCondition(), eq2(tags.id, tagId)));
+  async updateTag({
+    tagId,
+    color,
+    description,
+    name,
+    monthGoal
+  }) {
+    if (name) {
+      const tagExists = await this.getTag({ name, search: true });
+      if (tagExists && tagExists.id !== tagId) {
+        throw new TagAlreadyExistsError();
+      }
+    }
+    const goal = new Money(monthGoal);
+    const normalizedColor = color ? new HexColor(color).toString() : void 0;
+    const query = this.db.update(tags).set({
+      color: normalizedColor,
+      description,
+      name,
+      monthGoal: goal.getCents(),
+      updatedAt: /* @__PURE__ */ new Date()
+    }).where(and2(this.notRemovedCondition(), eq2(tags.id, tagId)));
     const [tag] = await query.returning();
     if (!tag) {
       throw new TagNotFoundError();
@@ -1295,31 +1569,33 @@ var createTagRoute = async (app2) => {
         summary: "Create tag",
         tags: ["Tags"],
         operationId: "createTag",
-        body: z10.object({
-          name: z10.string(),
-          color: z10.string().optional(),
-          description: z10.string().optional()
+        body: z11.object({
+          name: z11.string(),
+          color: z11.string(),
+          description: z11.string().optional(),
+          monthGoal: z11.number().optional()
         }),
         response: {
           [201 /* CREATED */]: insertTagSchema,
-          [500 /* INTERNAL_SERVER_ERROR */]: z10.object({
-            name: z10.string(),
-            message: z10.string()
+          [500 /* INTERNAL_SERVER_ERROR */]: z11.object({
+            name: z11.string(),
+            message: z11.string()
           })
         }
       }
     },
     async (request, reply) => {
-      const { name, color, description } = request.body;
+      const { name, color, description, monthGoal } = request.body;
       const tagsController = new TagsController(db);
       const [error, data] = await catchError(
         tagsController.createTag({
           name,
           color,
-          description
+          description,
+          monthGoal: monthGoal ?? 0
         }),
-        new TagAlreadyExistsError(),
-        new TagInvalidColor(color ?? "")
+        new TagAlreadyExistsError()
+        // new TagInvalidColor(color ?? '')
       );
       if (error) {
         return reply.status(error.statusCode).send({
@@ -1333,7 +1609,7 @@ var createTagRoute = async (app2) => {
 };
 
 // src/routes/tags/getAllRemovedTagsRoute.ts
-import z11 from "zod";
+import z12 from "zod";
 var getRemovedTagsRoute = async (app2) => {
   app2.get(
     "/all-removed",
@@ -1343,12 +1619,12 @@ var getRemovedTagsRoute = async (app2) => {
         tags: ["Tags"],
         operationId: "getAllRemovedTags",
         response: {
-          [200 /* OK */]: z11.object({
-            tags: z11.array(selectTagSchema)
+          [200 /* OK */]: z12.object({
+            tags: z12.array(selectTagSchema)
           }),
-          [500 /* INTERNAL_SERVER_ERROR */]: z11.object({
-            name: z11.string(),
-            message: z11.string()
+          [500 /* INTERNAL_SERVER_ERROR */]: z12.object({
+            name: z12.string(),
+            message: z12.string()
           })
         }
       }
@@ -1368,7 +1644,7 @@ var getRemovedTagsRoute = async (app2) => {
 };
 
 // src/routes/tags/getAllTagsRoute.ts
-import z12 from "zod";
+import z13 from "zod";
 var getTagsRoute = async (app2) => {
   app2.get(
     "/all",
@@ -1378,12 +1654,12 @@ var getTagsRoute = async (app2) => {
         tags: ["Tags"],
         operationId: "getAllTags",
         response: {
-          [200 /* OK */]: z12.object({
-            tags: z12.array(selectTagSchema)
+          [200 /* OK */]: z13.object({
+            tags: z13.array(selectTagSchema)
           }),
-          [500 /* INTERNAL_SERVER_ERROR */]: z12.object({
-            name: z12.string(),
-            message: z12.string()
+          [500 /* INTERNAL_SERVER_ERROR */]: z13.object({
+            name: z13.string(),
+            message: z13.string()
           })
         }
       }
@@ -1402,8 +1678,257 @@ var getTagsRoute = async (app2) => {
   );
 };
 
+// src/routes/tags/getMostUsedTags.ts
+import z14 from "zod";
+var getMostUsedTagsRoute = async (app2) => {
+  app2.get(
+    "/most-used",
+    {
+      schema: {
+        summary: "Get most used tags",
+        tags: ["Tags"],
+        operationId: "getMostUsedTags",
+        querystring: z14.object({
+          limit: z14.string().optional()
+        }),
+        response: {
+          [200 /* OK */]: z14.array(
+            z14.object({
+              id: z14.number(),
+              name: z14.string(),
+              color: z14.string(),
+              monthGoal: z14.number(),
+              usageCount: z14.number()
+            })
+          ),
+          [500 /* INTERNAL_SERVER_ERROR */]: z14.object({
+            name: z14.string(),
+            message: z14.string()
+          })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { limit } = request.query;
+      const limitNumber = limit ? Number.parseInt(limit) : void 0;
+      const tagsController = new TagsController(db);
+      const [error, data] = await catchError(
+        tagsController.getMostUsedTags({ limit: limitNumber })
+      );
+      if (error) {
+        return reply.status(error.statusCode).send({
+          name: error.name,
+          message: error.message
+        });
+      }
+      return reply.status(200 /* OK */).send(data);
+    }
+  );
+};
+
+// src/routes/tags/getSpreadsheet.ts
+import z15 from "zod";
+
+// src/class/Excel.ts
+import ExcelJS from "exceljs";
+
+// src/constant/excel.ts
+var monthNames = [
+  "Janeiro",
+  "Fevereiro",
+  "Mar\xE7o",
+  "Abril",
+  "Maio",
+  "Junho",
+  "Julho",
+  "Agosto",
+  "Setembro",
+  "Outubro",
+  "Novembro",
+  "Dezembro"
+];
+var borderStyle = {
+  top: { style: "thin" },
+  left: { style: "thin" },
+  bottom: { style: "thin" },
+  right: { style: "thin" }
+};
+
+// src/class/Excel.ts
+var ExcelUtil = class {
+  constructor(db2) {
+    this.db = db2;
+  }
+  async generateTagsWorkbook(year, untilMonth) {
+    const now = /* @__PURE__ */ new Date();
+    const currentYear = now.getFullYear();
+    const baseMonth = year !== currentYear ? 12 : untilMonth;
+    const tagsController = new TagsController(this.db);
+    const workbook = new ExcelJS.Workbook();
+    workbook.creator = "FinestControl";
+    for (let month = 1; month <= baseMonth; month++) {
+      const [error, data] = await catchError(
+        tagsController.getTagsWithExpenses({ month, year })
+      );
+      if (error) return [error, null];
+      this.createMonthlySheet(workbook, month, data);
+    }
+    return [null, workbook];
+  }
+  createMonthlySheet(workbook, month, data) {
+    const sheet = workbook.addWorksheet(monthNames[month - 1]);
+    this.addSheetHeader(sheet);
+    this.addTableHeaders(sheet);
+    this.addTagRows(sheet, data);
+    if (data.length > 0) this.addTotalRow(sheet, data);
+  }
+  addSheetHeader(sheet) {
+    sheet.getRow(1).height = 40;
+    sheet.mergeCells("A1", "C1");
+    const titleCell = sheet.getCell("A1");
+    titleCell.value = "CONTROLE DE DESPESAS";
+    titleCell.font = { bold: true, size: 14 };
+    titleCell.alignment = { vertical: "middle", horizontal: "center" };
+    titleCell.border = borderStyle;
+    titleCell.fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "d9f2d1" }
+    };
+  }
+  addTableHeaders(sheet) {
+    const headerRow = sheet.getRow(2);
+    headerRow.values = ["Nome da Despesa", "M\xE9dia Gasto", "Real Gasto"];
+    headerRow.font = { bold: true };
+    headerRow.alignment = { vertical: "middle", horizontal: "center" };
+    headerRow.height = 20;
+    const fillStyleHeader = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: "c2e4f5" }
+    };
+    for (const col of ["A", "B", "C"]) {
+      const cell = sheet.getCell(`${col}2`);
+      cell.border = borderStyle;
+      cell.fill = fillStyleHeader;
+    }
+    sheet.columns = [{ width: 30 }, { width: 30 }, { width: 30 }];
+  }
+  addTagRows(sheet, tags2) {
+    tags2.forEach((tag, index) => {
+      const rowIndex = 3 + index;
+      const row = sheet.getRow(rowIndex);
+      row.getCell("A").value = tag.name;
+      row.getCell("B").value = tag.monthGoal / 100;
+      row.getCell("C").value = tag.total / 100;
+      row.getCell("B").numFmt = "R$ #,##0.00";
+      row.getCell("C").numFmt = "R$ #,##0.00";
+      row.eachCell((cell, colNumber) => {
+        if (colNumber <= 3) {
+          cell.alignment = { vertical: "middle", horizontal: "center" };
+        }
+      });
+      const isLast = index === tags2.length - 1;
+      for (const col of ["A", "B", "C"]) {
+        const cell = row.getCell(col);
+        cell.border = {
+          top: { style: "thin" },
+          left: { style: "thin" },
+          right: { style: "thin" },
+          bottom: isLast ? { style: "thin" } : void 0
+        };
+      }
+    });
+  }
+  addTotalRow(sheet, tags2) {
+    const totalRowIndex = 3 + tags2.length;
+    const totalRow = sheet.getRow(totalRowIndex);
+    const totalGoal = tags2.reduce((sum2, tag) => sum2 + tag.monthGoal, 0) / 100;
+    const totalReal = tags2.reduce((sum2, tag) => sum2 + tag.total, 0) / 100;
+    totalRow.getCell("A").value = "TOTAL";
+    totalRow.getCell("B").value = totalGoal;
+    totalRow.getCell("C").value = totalReal;
+    totalRow.getCell("B").numFmt = "R$ #,##0.00";
+    totalRow.getCell("C").numFmt = "R$ #,##0.00";
+    totalRow.eachCell((cell, colNumber) => {
+      if (colNumber <= 3) {
+        cell.alignment = { vertical: "middle", horizontal: "center" };
+        cell.font = { bold: true };
+      }
+    });
+    for (const col of ["A", "B", "C"]) {
+      const cell = totalRow.getCell(col);
+      cell.border = borderStyle;
+    }
+    totalRow.getCell("C").fill = {
+      type: "pattern",
+      pattern: "solid",
+      fgColor: { argb: totalReal > totalGoal ? "ffc7ce" : "c6efce" }
+    };
+  }
+};
+
+// src/routes/tags/getSpreadsheet.ts
+var downloadTagsWithSpendsRoute = async (app2) => {
+  app2.get(
+    "/with-spends/download",
+    {
+      schema: {
+        summary: "Exporta os gastos por tag at\xE9 o m\xEAs atual como planilha Excel",
+        tags: ["Tags"],
+        operationId: "downloadTagsWithSpends",
+        querystring: z15.object({
+          year: z15.string().optional().refine(
+            (val) => {
+              if (!val) return true;
+              const num = Number(val);
+              return !Number.isNaN(num) && num > 0;
+            },
+            { message: "O ano deve ser um n\xFAmero v\xE1lido." }
+          ).transform((val) => val ? Number(val) : void 0)
+        }),
+        responseDescriptions: {
+          [200 /* OK */]: {
+            description: "Planilha Excel com os gastos por tag",
+            content: {
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {
+                schema: { type: "string", format: "binary" }
+              }
+            }
+          }
+        }
+      }
+    },
+    async (request, reply) => {
+      const { year } = request.query;
+      const now = /* @__PURE__ */ new Date();
+      const currentYear = year ?? now.getFullYear();
+      const currentMonth = now.getMonth() + 1;
+      const excelInstance = new ExcelUtil(db);
+      const [error, workbook] = await excelInstance.generateTagsWorkbook(
+        currentYear,
+        currentMonth
+      );
+      if (error) {
+        return reply.status(error.statusCode ?? 500).send({
+          name: error.name ?? "InternalServerError",
+          message: error.message ?? "Erro ao gerar planilha."
+        });
+      }
+      const buffer = await workbook.xlsx.writeBuffer();
+      reply.header(
+        "Content-Type",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      ).header(
+        "Content-Disposition",
+        `attachment; filename=gastos-tags-${currentYear}.xlsx`
+      ).send(buffer);
+    }
+  );
+};
+
 // src/routes/tags/getTagRoute.ts
-import z13 from "zod";
+import z16 from "zod";
 var getTagRoute = async (app2) => {
   app2.get(
     "",
@@ -1412,19 +1937,19 @@ var getTagRoute = async (app2) => {
         summary: "Get tag by id or name",
         tags: ["Tags"],
         operationId: "getTag",
-        querystring: z13.object({
-          id: z13.string().optional(),
-          name: z13.string().optional()
+        querystring: z16.object({
+          id: z16.string().optional(),
+          name: z16.string().optional()
         }),
         response: {
           [200 /* OK */]: selectTagSchema,
-          [404 /* NOT_FOUND */]: z13.object({
-            name: z13.string(),
-            message: z13.string()
+          [404 /* NOT_FOUND */]: z16.object({
+            name: z16.string(),
+            message: z16.string()
           }),
-          [400 /* BAD_REQUEST */]: z13.object({
-            name: z13.string(),
-            message: z13.string()
+          [400 /* BAD_REQUEST */]: z16.object({
+            name: z16.string(),
+            message: z16.string()
           })
         }
       }
@@ -1452,8 +1977,74 @@ var getTagRoute = async (app2) => {
   );
 };
 
+// src/routes/tags/getTagsWithSpendsRoute.ts
+import z17 from "zod";
+var getTagsWithSpendsRoute = async (app2) => {
+  app2.get(
+    "/with-spends",
+    {
+      schema: {
+        summary: "Get all tags with their monthly goal and monthly total spent",
+        tags: ["Tags"],
+        operationId: "getAllTagsWithSpends",
+        querystring: z17.object({
+          month: z17.string().refine(
+            (val) => {
+              const num = Number(val);
+              return !Number.isNaN(num) && num >= 1 && num <= 12;
+            },
+            {
+              message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
+            }
+          ).transform((val) => Number(val)),
+          year: z17.string().optional().refine(
+            (val) => {
+              if (!val) return true;
+              const num = Number(val);
+              return !Number.isNaN(num) && num > 0;
+            },
+            {
+              message: "O ano deve ser um n\xFAmero v\xE1lido."
+            }
+          )
+        }),
+        response: {
+          [200 /* OK */]: z17.array(
+            z17.object({
+              id: z17.number(),
+              name: z17.string(),
+              color: z17.string(),
+              monthGoal: z17.number(),
+              total: z17.number()
+            })
+          ),
+          [500 /* INTERNAL_SERVER_ERROR */]: z17.object({
+            name: z17.string(),
+            message: z17.string()
+          })
+        }
+      }
+    },
+    async (request, reply) => {
+      const { month, year: baseYear } = request.query;
+      const year = baseYear ? Number.parseInt(baseYear) : void 0;
+      const tagsController = new TagsController(db);
+      const [error, data] = await catchError(
+        tagsController.getTagsWithExpenses({ month, year })
+      );
+      if (error) {
+        return reply.status(error.statusCode).send({
+          name: error.name,
+          message: error.message
+        });
+      }
+      return reply.status(200 /* OK */).send(data);
+    }
+  );
+};
+
 // src/routes/tags/removeTagRoute.ts
-import z14 from "zod";
+import z18 from "zod";
 var removeTagRoute = async (app2) => {
   app2.patch(
     "/remove/:id",
@@ -1462,14 +2053,14 @@ var removeTagRoute = async (app2) => {
         summary: "Remove tag",
         tags: ["Tags"],
         operationId: "removeTag",
-        params: z14.object({
-          id: z14.string()
+        params: z18.object({
+          id: z18.string()
         }),
         response: {
           [200 /* OK */]: updateTagSchema,
-          [404 /* NOT_FOUND */]: z14.object({
-            name: z14.string(),
-            message: z14.string()
+          [404 /* NOT_FOUND */]: z18.object({
+            name: z18.string(),
+            message: z18.string()
           })
         }
       }
@@ -1496,7 +2087,7 @@ var removeTagRoute = async (app2) => {
 };
 
 // src/routes/tags/restoreTagRoute.ts
-import z15 from "zod";
+import z19 from "zod";
 var restoreTagRoute = async (app2) => {
   app2.patch(
     "/restore/:id",
@@ -1505,14 +2096,14 @@ var restoreTagRoute = async (app2) => {
         summary: "Restore tag",
         tags: ["Tags"],
         operationId: "restoreTag",
-        params: z15.object({
-          id: z15.string()
+        params: z19.object({
+          id: z19.string()
         }),
         response: {
           [200 /* OK */]: updateTagSchema,
-          [404 /* NOT_FOUND */]: z15.object({
-            name: z15.string(),
-            message: z15.string()
+          [404 /* NOT_FOUND */]: z19.object({
+            name: z19.string(),
+            message: z19.string()
           })
         }
       }
@@ -1539,7 +2130,7 @@ var restoreTagRoute = async (app2) => {
 };
 
 // src/routes/tags/updateTagRoute.ts
-import z16 from "zod";
+import z20 from "zod";
 var updateTagRoute = async (app2) => {
   app2.patch(
     "/update",
@@ -1548,30 +2139,32 @@ var updateTagRoute = async (app2) => {
         summary: "Update tag",
         tags: ["Tags"],
         operationId: "updateTag",
-        body: z16.object({
-          id: z16.number(),
-          name: z16.string().optional(),
-          color: z16.string().optional(),
-          description: z16.string().optional()
+        body: z20.object({
+          id: z20.number(),
+          name: z20.string().optional(),
+          color: z20.string(),
+          description: z20.string().optional(),
+          monthGoal: z20.number()
         }),
         response: {
           [200 /* OK */]: updateTagSchema,
-          [404 /* NOT_FOUND */]: z16.object({
-            name: z16.string(),
-            message: z16.string()
+          [404 /* NOT_FOUND */]: z20.object({
+            name: z20.string(),
+            message: z20.string()
           })
         }
       }
     },
     async (request, reply) => {
-      const { id, name, color, description } = request.body;
+      const { id, name, color, description, monthGoal } = request.body;
       const tagsController = new TagsController(db);
       const [error, data] = await catchError(
         tagsController.updateTag({
           tagId: id,
           name,
           color,
-          description
+          description,
+          monthGoal
         }),
         new TagNotFoundError()
       );
@@ -1591,6 +2184,9 @@ var routes2 = [
   getTagsRoute,
   getTagRoute,
   getRemovedTagsRoute,
+  getMostUsedTagsRoute,
+  getTagsWithSpendsRoute,
+  downloadTagsWithSpendsRoute,
   createTagRoute,
   updateTagRoute,
   removeTagRoute,
@@ -1600,10 +2196,10 @@ var prefix2 = "/tags";
 var tagsRoutes = registerPrefix(routes2, prefix2);
 
 // src/routes/totalAmount/getAmountRoute.ts
-import z17 from "zod";
+import z21 from "zod";
 
 // src/controller/TotalAmountController.ts
-import { and as and3, desc as desc2, gte, lte } from "drizzle-orm";
+import { and as and3, desc as desc3, gte as gte3, lte as lte3 } from "drizzle-orm";
 
 // src/errors/custom/TotalAmountError.ts
 var TotalAmountError = class extends CustomError {
@@ -1639,12 +2235,18 @@ var TotalAmountController = class {
     this.db = db2;
   }
   async getAmount() {
-    const [totalAmountValue] = await this.db.select().from(totalAmount).orderBy(desc2(totalAmount.createdAt)).limit(1);
+    const [totalAmountValue] = await this.db.select().from(totalAmount).orderBy(desc3(totalAmount.createdAt)).limit(1);
     return totalAmountValue;
+  }
+  async getRoughAmount() {
+    const [roughAmountValue] = await this.db.select({
+      total: totalAmount.total
+    }).from(totalAmount).orderBy(desc3(totalAmount.createdAt)).limit(1);
+    return roughAmountValue.total ?? 0;
   }
   async createAmount({ amount, isSpend, transactionId }) {
     const totalAmountModel = new TotalAmountModel(this.db, totalAmount);
-    const { total } = await this.getAmount();
+    const { total } = await this.getAmount() ?? 0;
     const lastAmount = total ?? 0;
     const newTotal = isSpend ? lastAmount - amount : lastAmount + amount;
     const totalAmountValue = await totalAmountModel.insertAmount({
@@ -1660,10 +2262,10 @@ var TotalAmountController = class {
     const monthEnd = new Date(year, month, 0, 23, 59, 59, 999);
     const query = this.db.select().from(totalAmount).where(
       and3(
-        gte(totalAmount.createdAt, monthStart),
-        lte(totalAmount.createdAt, monthEnd)
+        gte3(totalAmount.createdAt, monthStart),
+        lte3(totalAmount.createdAt, monthEnd)
       )
-    ).orderBy(desc2(totalAmount.createdAt));
+    ).orderBy(desc3(totalAmount.createdAt));
     if (last) {
       query.limit(1);
     }
@@ -1691,9 +2293,9 @@ var getLastAmountRoute = async (app2) => {
         operationId: "getLastAmount",
         response: {
           [200 /* OK */]: selectTotalAmountSchema,
-          [500 /* INTERNAL_SERVER_ERROR */]: z17.object({
-            name: z17.string(),
-            message: z17.string()
+          [500 /* INTERNAL_SERVER_ERROR */]: z21.object({
+            name: z21.string(),
+            message: z21.string()
           })
         }
       }
@@ -1713,7 +2315,7 @@ var getLastAmountRoute = async (app2) => {
 };
 
 // src/routes/totalAmount/getMonthAmountRoute.ts
-import z18 from "zod";
+import z22 from "zod";
 var getMonthAmountRoute = async (app2) => {
   app2.get(
     "/month",
@@ -1722,8 +2324,8 @@ var getMonthAmountRoute = async (app2) => {
         summary: "Get total amount from a specific month",
         tags: ["Total Amount"],
         operationId: "getMonthAmount",
-        querystring: z18.object({
-          month: z18.string().refine(
+        querystring: z22.object({
+          month: z22.string().refine(
             (val) => {
               const num = Number(val);
               return !Number.isNaN(num) && num >= 1 && num <= 12;
@@ -1732,8 +2334,8 @@ var getMonthAmountRoute = async (app2) => {
               message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
             }
           ),
-          year: z18.string().optional(),
-          last: z18.string().optional().transform((value) => {
+          year: z22.string().optional(),
+          last: z22.string().optional().transform((value) => {
             if (!value) return void 0;
             const lowerVal = value.toLowerCase();
             if (lowerVal === "true") return true;
@@ -1741,10 +2343,10 @@ var getMonthAmountRoute = async (app2) => {
           })
         }),
         response: {
-          [200 /* OK */]: z18.array(selectTotalAmountSchema),
-          [500 /* INTERNAL_SERVER_ERROR */]: z18.object({
-            name: z18.string(),
-            message: z18.string()
+          [200 /* OK */]: z22.array(selectTotalAmountSchema),
+          [500 /* INTERNAL_SERVER_ERROR */]: z22.object({
+            name: z22.string(),
+            message: z22.string()
           })
         }
       }
@@ -1773,54 +2375,51 @@ var getMonthAmountRoute = async (app2) => {
   );
 };
 
+// src/routes/totalAmount/getRoughAmountROute.ts
+import z23 from "zod";
+var getRoughAmountRoute = async (app2) => {
+  app2.get(
+    "/number",
+    {
+      schema: {
+        summary: "Get last total amount in number",
+        tags: ["Total Amount"],
+        operationId: "getRoughAmount",
+        response: {
+          [200 /* OK */]: z23.number(),
+          [500 /* INTERNAL_SERVER_ERROR */]: z23.object({
+            name: z23.string(),
+            message: z23.string()
+          })
+        }
+      }
+    },
+    async (request, reply) => {
+      const totalAmountController = new TotalAmountController(db);
+      const [error, data] = await catchError(
+        totalAmountController.getRoughAmount()
+      );
+      if (error) {
+        return reply.status(error.statusCode).send({
+          name: error.name,
+          message: error.message
+        });
+      }
+      return reply.status(200 /* OK */).send(data ?? 0);
+    }
+  );
+};
+
 // src/routes/totalAmount/index.ts
-var routes3 = [getLastAmountRoute, getMonthAmountRoute];
+var routes3 = [getLastAmountRoute, getMonthAmountRoute, getRoughAmountRoute];
 var prefix3 = "/total-amount";
 var totalAmountRoutes = registerPrefix(routes3, prefix3);
 
 // src/routes/transactions/createTransaction.ts
-import z19 from "zod";
+import z24 from "zod";
 
 // src/controller/TransactionsController.ts
-import { and as and4, desc as desc3, eq as eq3, gte as gte2, isNull as isNull3, lte as lte2 } from "drizzle-orm";
-
-// src/class/Money.ts
-var Money = class _Money {
-  cents;
-  constructor(amount) {
-    this.cents = Math.round(amount * 100);
-  }
-  static fromCents(cents) {
-    return new _Money(cents / 100);
-  }
-  getCents() {
-    return this.cents;
-  }
-  getReais() {
-    return this.cents / 100;
-  }
-  format(locale = "pt-BR", currency = "BRL") {
-    return new Intl.NumberFormat(locale, {
-      style: "currency",
-      currency
-    }).format(this.getReais());
-  }
-  add(other) {
-    this.cents += other.getCents();
-    return this;
-  }
-  subtract(other) {
-    this.cents -= other.getCents();
-    return this;
-  }
-  multiply(factor) {
-    this.cents = Math.round(this.cents * factor);
-    return this;
-  }
-  equals(other) {
-    return this.cents === other.getCents();
-  }
-};
+import { and as and4, desc as desc4, eq as eq3, gte as gte4, isNull as isNull3, lte as lte4 } from "drizzle-orm";
 
 // src/class/TransactionHelper.ts
 var TransactionHelper = class {
@@ -1828,6 +2427,7 @@ var TransactionHelper = class {
     this.transactionList = transactionList;
   }
   separateSpends() {
+    console.info(this.transactionList);
     const spends = this.transactionList.filter(
       (transaction) => transaction.isSpend
     );
@@ -1839,7 +2439,7 @@ var TransactionHelper = class {
       new Money(0)
     );
     const totalIncomes = incomes.reduce(
-      (acc, curr) => acc.add(new Money(curr.amount)),
+      (acc, curr) => acc.add(new Money(Math.abs(curr.amount))),
       new Money(0)
     );
     const overallBalance = totalIncomes.subtract(totalSpends);
@@ -1875,11 +2475,11 @@ var TransactionHelper = class {
       const spends = transactions2.filter((t) => t.isSpend);
       const incomes = transactions2.filter((t) => !t.isSpend);
       const totalSpends = spends.reduce(
-        (acc, curr) => acc.add(new Money(curr.amount)),
+        (acc, curr) => acc.add(new Money(curr.amount / 100)),
         new Money(0)
       );
       const totalIncomes = incomes.reduce(
-        (acc, curr) => acc.add(new Money(curr.amount)),
+        (acc, curr) => acc.add(new Money(curr.amount / 100)),
         new Money(0)
       );
       const overallBalance = totalIncomes.subtract(totalSpends);
@@ -1887,9 +2487,9 @@ var TransactionHelper = class {
         spends,
         incomes,
         details: {
-          totalSpends: totalSpends.getReais(),
-          totalIncomes: totalIncomes.getReais(),
-          overallBalance: overallBalance.getReais()
+          totalSpends: totalSpends.getCents(),
+          totalIncomes: totalIncomes.getCents(),
+          overallBalance: overallBalance.getCents()
         }
       };
     }
@@ -1995,6 +2595,7 @@ var TransactionsController = class {
       paymentType: paymentType.name,
       tagName: tags.name,
       tagColor: tags.color,
+      tagGoal: tags.monthGoal,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       isSpend: transactions.isSpend
@@ -2012,12 +2613,13 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
+      paymentTypeIcon: paymentType.icon,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       tagName: tags.name,
       tagColor: tags.color,
       isSpend: transactions.isSpend
-    }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(this.notRemovedCondition()).orderBy(desc3(transactions.createdAt));
+    }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(this.notRemovedCondition()).orderBy(desc4(transactions.createdAt));
     if (limit) query.limit(limit);
     const transactionsList = await query;
     const transactionHelperInstance = new TransactionHelper(transactionsList);
@@ -2035,14 +2637,15 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
+      paymentTypeIcon: paymentType.icon,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       tagName: tags.name,
       tagColor: tags.color,
       isSpend: transactions.isSpend
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(
-      and4(this.notRemovedCondition(), gte2(transactions.createdAt, monthStart))
-    ).orderBy(desc3(transactions.createdAt));
+      and4(this.notRemovedCondition(), gte4(transactions.createdAt, monthStart))
+    ).orderBy(desc4(transactions.createdAt));
     const transactionsList = await query;
     const transactionHelperInstance = new TransactionHelper(transactionsList);
     const separatedTransactions = transactionHelperInstance.separateByMonthWithTotals();
@@ -2058,6 +2661,7 @@ var TransactionsController = class {
     const query = this.db.select({
       id: transactions.id,
       paymentType: paymentType.name,
+      paymentTypeIcon: paymentType.icon,
       amount: transactions.amount,
       createdAt: transactions.createdAt,
       tagName: tags.name,
@@ -2066,10 +2670,10 @@ var TransactionsController = class {
     }).from(transactions).innerJoin(paymentType, eq3(transactions.paymentTypeId, paymentType.id)).innerJoin(tags, eq3(transactions.tagId, tags.id)).where(
       and4(
         this.notRemovedCondition(),
-        gte2(transactions.createdAt, monthStart),
-        lte2(transactions.createdAt, monthEnd)
+        gte4(transactions.createdAt, monthStart),
+        lte4(transactions.createdAt, monthEnd)
       )
-    ).orderBy(desc3(transactions.createdAt));
+    ).orderBy(desc4(transactions.createdAt));
     const transactionsList = await query;
     const transactionHelperInstance = new TransactionHelper(transactionsList);
     return {
@@ -2082,9 +2686,10 @@ var TransactionsController = class {
     amount,
     isSpend,
     paymentTypeId,
-    tagId
+    tagId,
+    createdAt
   }) {
-    const payment = amount % 1 !== 0 ? new Money(amount) : new Money(amount / 100);
+    const payment = new Money(amount);
     const paymentType2 = await this.paymentTypeController.getPaymentType({
       typeId: paymentTypeId
     });
@@ -2097,7 +2702,8 @@ var TransactionsController = class {
         amount: payment.getCents(),
         isSpend,
         paymentTypeId: paymentType2.id,
-        tagId: tag.id
+        tagId: tag.id,
+        createdAt: createdAt ?? /* @__PURE__ */ new Date()
       }).returning();
       await totalAmountController.createAmount({
         amount: payment.getCents(),
@@ -2124,30 +2730,39 @@ var createTransactionRoute = async (app2) => {
         summary: "Create a transaction",
         tags: ["Transactions"],
         operationId: "createTransaction",
-        body: z19.object({
-          amount: z19.number(),
-          isSpend: z19.boolean(),
-          paymentTypeId: z19.number(),
-          tagId: z19.number()
+        body: z24.object({
+          amount: z24.number(),
+          isSpend: z24.boolean(),
+          paymentTypeId: z24.number(),
+          tagId: z24.number(),
+          createdAt: z24.string().optional()
         }),
         response: {
           [200 /* OK */]: insertTransactionSchema,
-          [404 /* NOT_FOUND */]: z19.object({
-            name: z19.string(),
-            message: z19.string()
+          [404 /* NOT_FOUND */]: z24.object({
+            name: z24.string(),
+            message: z24.string()
           })
         }
       }
     },
     async (request, reply) => {
-      const { amount, isSpend, paymentTypeId, tagId } = request.body;
+      const {
+        amount,
+        isSpend,
+        paymentTypeId,
+        tagId,
+        createdAt: createdAtStr
+      } = request.body;
       const transactionsController = new TransactionsController(db);
+      const createdAt = createdAtStr ? new Date(createdAtStr) : void 0;
       const [error, data] = await catchError(
         transactionsController.createTransaction({
           amount,
           isSpend,
           paymentTypeId,
-          tagId
+          tagId,
+          createdAt
         }),
         new TagNotFoundError(),
         new PaymentTypeNotFoundError()
@@ -2164,7 +2779,7 @@ var createTransactionRoute = async (app2) => {
 };
 
 // src/routes/transactions/getAllTransactionsByMonthRoute.ts
-import z20 from "zod";
+import z25 from "zod";
 var getAllTransactionsByMonthRoute = async (app2) => {
   app2.get(
     "/month",
@@ -2173,8 +2788,8 @@ var getAllTransactionsByMonthRoute = async (app2) => {
         summary: "Get all transactions from a specific month",
         tags: ["Transactions"],
         operationId: "getAllTransactionsByMonth",
-        querystring: z20.object({
-          month: z20.string().refine(
+        querystring: z25.object({
+          month: z25.string().refine(
             (val) => {
               const num = Number(val);
               return !Number.isNaN(num) && num >= 1 && num <= 12;
@@ -2183,7 +2798,7 @@ var getAllTransactionsByMonthRoute = async (app2) => {
               message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
             }
           ).transform((val) => Number(val)),
-          year: z20.string().optional().refine(
+          year: z25.string().optional().refine(
             (val) => {
               if (!val) return true;
               const num = Number(val);
@@ -2195,46 +2810,48 @@ var getAllTransactionsByMonthRoute = async (app2) => {
           )
         }),
         response: {
-          [200 /* OK */]: z20.object({
-            month: z20.number(),
-            year: z20.number(),
-            transactions: z20.object({
-              spends: z20.array(
-                z20.object({
-                  id: z20.number(),
-                  createdAt: z20.date().nullable(),
-                  isSpend: z20.boolean(),
-                  amount: z20.number(),
-                  paymentType: z20.string(),
-                  tagName: z20.string(),
-                  tagColor: z20.string()
+          [200 /* OK */]: z25.object({
+            month: z25.number(),
+            year: z25.number(),
+            transactions: z25.object({
+              spends: z25.array(
+                z25.object({
+                  id: z25.number(),
+                  createdAt: z25.date().nullable(),
+                  isSpend: z25.boolean(),
+                  amount: z25.number(),
+                  paymentType: z25.string(),
+                  paymentTypeIcon: z25.string(),
+                  tagName: z25.string(),
+                  tagColor: z25.string()
                 })
               ),
-              incomes: z20.array(
-                z20.object({
-                  id: z20.number(),
-                  createdAt: z20.date().nullable(),
-                  isSpend: z20.boolean(),
-                  amount: z20.number(),
-                  paymentType: z20.string(),
-                  tagName: z20.string(),
-                  tagColor: z20.string()
+              incomes: z25.array(
+                z25.object({
+                  id: z25.number(),
+                  createdAt: z25.date().nullable(),
+                  isSpend: z25.boolean(),
+                  amount: z25.number(),
+                  paymentType: z25.string(),
+                  paymentTypeIcon: z25.string(),
+                  tagName: z25.string(),
+                  tagColor: z25.string()
                 })
               ),
-              details: z20.object({
-                totalSpends: z20.number(),
-                totalIncomes: z20.number(),
-                overallBalance: z20.number()
+              details: z25.object({
+                totalSpends: z25.number(),
+                totalIncomes: z25.number(),
+                overallBalance: z25.number()
               })
             })
           }),
-          [404 /* NOT_FOUND */]: z20.object({
-            name: z20.string(),
-            message: z20.string()
+          [404 /* NOT_FOUND */]: z25.object({
+            name: z25.string(),
+            message: z25.string()
           }),
-          [400 /* BAD_REQUEST */]: z20.object({
-            name: z20.string(),
-            message: z20.string()
+          [400 /* BAD_REQUEST */]: z25.object({
+            name: z25.string(),
+            message: z25.string()
           })
         }
       }
@@ -2258,7 +2875,7 @@ var getAllTransactionsByMonthRoute = async (app2) => {
 };
 
 // src/routes/transactions/getAllTransactionsPaymentTypeRoute.ts
-import z21 from "zod";
+import z26 from "zod";
 var getAllTransactionsPaymentTypeRoute = async (app2) => {
   app2.get(
     "/payment-type",
@@ -2267,31 +2884,31 @@ var getAllTransactionsPaymentTypeRoute = async (app2) => {
         summary: "Get all transactions from a specific payment type",
         tags: ["Transactions"],
         operationId: "getAllTransactionsByPaymentType",
-        querystring: z21.object({
-          paymentTypeId: z21.string(),
-          paymentTypeName: z21.string().optional()
+        querystring: z26.object({
+          paymentTypeId: z26.string(),
+          paymentTypeName: z26.string().optional()
         }),
         response: {
-          [200 /* OK */]: z21.object({
-            transactions: z21.array(
-              z21.object({
-                id: z21.number(),
-                createdAt: z21.date().nullable(),
-                isSpend: z21.boolean(),
-                amount: z21.number(),
-                paymentType: z21.string(),
-                tagName: z21.string(),
-                tagColor: z21.string()
+          [200 /* OK */]: z26.object({
+            transactions: z26.array(
+              z26.object({
+                id: z26.number(),
+                createdAt: z26.date().nullable(),
+                isSpend: z26.boolean(),
+                amount: z26.number(),
+                paymentType: z26.string(),
+                tagName: z26.string(),
+                tagColor: z26.string()
               })
             )
           }),
-          [400 /* BAD_REQUEST */]: z21.object({
-            name: z21.string(),
-            message: z21.string()
+          [400 /* BAD_REQUEST */]: z26.object({
+            name: z26.string(),
+            message: z26.string()
           }),
-          [404 /* NOT_FOUND */]: z21.object({
-            name: z21.string(),
-            message: z21.string()
+          [404 /* NOT_FOUND */]: z26.object({
+            name: z26.string(),
+            message: z26.string()
           })
         }
       }
@@ -2320,15 +2937,16 @@ var getAllTransactionsPaymentTypeRoute = async (app2) => {
 };
 
 // src/routes/transactions/getAllTransactionsRoute.ts
-import z22 from "zod";
-var transactionSchema = z22.object({
-  id: z22.number(),
-  createdAt: z22.date().nullable(),
-  isSpend: z22.boolean(),
-  amount: z22.number(),
-  paymentType: z22.string(),
-  tagName: z22.string(),
-  tagColor: z22.string()
+import z27 from "zod";
+var transactionSchema = z27.object({
+  id: z27.number(),
+  createdAt: z27.date().nullable(),
+  isSpend: z27.boolean(),
+  amount: z27.number(),
+  paymentType: z27.string(),
+  paymentTypeIcon: z27.string(),
+  tagName: z27.string(),
+  tagColor: z27.string()
 });
 var getAllTransactionsRoute = async (app2) => {
   app2.get(
@@ -2338,16 +2956,16 @@ var getAllTransactionsRoute = async (app2) => {
         summary: "Get all transactions",
         tags: ["Transactions"],
         operationId: "getAllTransactions",
-        querystring: z22.object({
-          limit: z22.string().optional()
+        querystring: z27.object({
+          limit: z27.string().optional()
         }),
         response: {
-          [200 /* OK */]: z22.object({
-            transactions: z22.record(z22.string(), z22.array(transactionSchema))
+          [200 /* OK */]: z27.object({
+            transactions: z27.record(z27.string(), z27.array(transactionSchema))
           }),
-          [500 /* INTERNAL_SERVER_ERROR */]: z22.object({
-            name: z22.string(),
-            message: z22.string()
+          [500 /* INTERNAL_SERVER_ERROR */]: z27.object({
+            name: z27.string(),
+            message: z27.string()
           })
         }
       }
@@ -2371,7 +2989,7 @@ var getAllTransactionsRoute = async (app2) => {
 };
 
 // src/routes/transactions/getAllTransactionsTagRoute.ts
-import z23 from "zod";
+import z28 from "zod";
 var getAllTransactionsTagRoute = async (app2) => {
   app2.get(
     "/tag",
@@ -2380,31 +2998,32 @@ var getAllTransactionsTagRoute = async (app2) => {
         summary: "Get all transactions from a specific tag",
         tags: ["Transactions"],
         operationId: "getAllTransactionsByTag",
-        querystring: z23.object({
-          tagId: z23.string(),
-          tagName: z23.string().optional()
+        querystring: z28.object({
+          tagId: z28.string(),
+          tagName: z28.string().optional()
         }),
         response: {
-          [200 /* OK */]: z23.object({
-            transactions: z23.array(
-              z23.object({
-                id: z23.number(),
-                createdAt: z23.date().nullable(),
-                isSpend: z23.boolean(),
-                amount: z23.number(),
-                paymentType: z23.string(),
-                tagName: z23.string(),
-                tagColor: z23.string()
+          [200 /* OK */]: z28.object({
+            transactions: z28.array(
+              z28.object({
+                id: z28.number(),
+                createdAt: z28.date().nullable(),
+                isSpend: z28.boolean(),
+                amount: z28.number(),
+                paymentType: z28.string(),
+                tagGoal: z28.number(),
+                tagName: z28.string(),
+                tagColor: z28.string()
               })
             )
           }),
-          [400 /* BAD_REQUEST */]: z23.object({
-            name: z23.string(),
-            message: z23.string()
+          [400 /* BAD_REQUEST */]: z28.object({
+            name: z28.string(),
+            message: z28.string()
           }),
-          [404 /* NOT_FOUND */]: z23.object({
-            name: z23.string(),
-            message: z23.string()
+          [404 /* NOT_FOUND */]: z28.object({
+            name: z28.string(),
+            message: z28.string()
           })
         }
       }
@@ -2433,25 +3052,26 @@ var getAllTransactionsTagRoute = async (app2) => {
 };
 
 // src/routes/transactions/getAllTransactionsWithMonthRoute.ts
-import z24 from "zod";
-var transactionSchema2 = z24.object({
-  id: z24.number(),
-  createdAt: z24.date().nullable(),
-  isSpend: z24.boolean(),
-  amount: z24.number(),
-  paymentType: z24.string(),
-  tagName: z24.string(),
-  tagColor: z24.string()
+import z29 from "zod";
+var transactionSchema2 = z29.object({
+  id: z29.number(),
+  createdAt: z29.date().nullable(),
+  isSpend: z29.boolean(),
+  amount: z29.number(),
+  paymentType: z29.string(),
+  paymentTypeIcon: z29.string(),
+  tagName: z29.string(),
+  tagColor: z29.string()
 });
-var monthlyTransactionSummarySchema = z24.record(
-  z24.string(),
-  z24.object({
-    spends: z24.array(transactionSchema2),
-    incomes: z24.array(transactionSchema2),
-    details: z24.object({
-      totalSpends: z24.number(),
-      totalIncomes: z24.number(),
-      overallBalance: z24.number()
+var monthlyTransactionSummarySchema = z29.record(
+  z29.string(),
+  z29.object({
+    spends: z29.array(transactionSchema2),
+    incomes: z29.array(transactionSchema2),
+    details: z29.object({
+      totalSpends: z29.number(),
+      totalIncomes: z29.number(),
+      overallBalance: z29.number()
     })
   })
 );
@@ -2463,8 +3083,8 @@ var getAllTransactionsWithMonthRoute = async (app2) => {
         summary: "Get all transactions from a specific range of months",
         tags: ["Transactions"],
         operationId: "getAllTransactionsWithMonth",
-        querystring: z24.object({
-          month: z24.string().optional().refine(
+        querystring: z29.object({
+          month: z29.string().optional().refine(
             (val) => val === void 0 || Number(val) >= 1 && Number(val) <= 12,
             {
               message: "O m\xEAs deve ser um n\xFAmero entre 1 e 12."
@@ -2473,7 +3093,7 @@ var getAllTransactionsWithMonthRoute = async (app2) => {
             const num = Number(val);
             return Number.isNaN(num) ? void 0 : num;
           }),
-          year: z24.string().optional().refine(
+          year: z29.string().optional().refine(
             (val) => {
               if (!val) return true;
               const num = Number(val);
@@ -2489,13 +3109,13 @@ var getAllTransactionsWithMonthRoute = async (app2) => {
         }),
         response: {
           [200 /* OK */]: monthlyTransactionSummarySchema,
-          [404 /* NOT_FOUND */]: z24.object({
-            name: z24.string(),
-            message: z24.string()
+          [404 /* NOT_FOUND */]: z29.object({
+            name: z29.string(),
+            message: z29.string()
           }),
-          [400 /* BAD_REQUEST */]: z24.object({
-            name: z24.string(),
-            message: z24.string()
+          [400 /* BAD_REQUEST */]: z29.object({
+            name: z29.string(),
+            message: z29.string()
           })
         }
       }
@@ -2518,7 +3138,7 @@ var getAllTransactionsWithMonthRoute = async (app2) => {
 };
 
 // src/routes/transactions/getTransactionRoute.ts
-import z25 from "zod";
+import z30 from "zod";
 var getTransactionRoute = async (app2) => {
   app2.get(
     "",
@@ -2527,22 +3147,22 @@ var getTransactionRoute = async (app2) => {
         summary: "Get a transaction by id",
         tags: ["Transactions"],
         operationId: "getTransactionById",
-        querystring: z25.object({
-          id: z25.string()
+        querystring: z30.object({
+          id: z30.string()
         }),
         response: {
-          [200 /* OK */]: z25.object({
-            id: z25.number(),
-            createdAt: z25.date().nullable(),
-            isSpend: z25.boolean(),
-            amount: z25.number(),
-            paymentType: z25.string(),
-            tagName: z25.string(),
-            tagColor: z25.string()
+          [200 /* OK */]: z30.object({
+            id: z30.number(),
+            createdAt: z30.date().nullable(),
+            isSpend: z30.boolean(),
+            amount: z30.number(),
+            paymentType: z30.string(),
+            tagName: z30.string(),
+            tagColor: z30.string()
           }),
-          [404 /* NOT_FOUND */]: z25.object({
-            name: z25.string(),
-            message: z25.string()
+          [404 /* NOT_FOUND */]: z30.object({
+            name: z30.string(),
+            message: z30.string()
           })
         }
       }

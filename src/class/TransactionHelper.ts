@@ -7,6 +7,7 @@ import { Money } from './Money'
 export class TransactionHelper {
   constructor(private readonly transactionList: TransactionList[]) {}
   separateSpends() {
+    console.info(this.transactionList)
     const spends = this.transactionList.filter(
       transaction => transaction.isSpend
     )
@@ -20,7 +21,7 @@ export class TransactionHelper {
     )
 
     const totalIncomes = incomes.reduce(
-      (acc: Money, curr) => acc.add(new Money(curr.amount)),
+      (acc: Money, curr) => acc.add(new Money(Math.abs(curr.amount))),
       new Money(0)
     )
 
@@ -43,7 +44,6 @@ export class TransactionHelper {
         if (transaction.createdAt) {
           const monthKey = `${transaction.createdAt.getFullYear()}-${transaction.createdAt.getMonth() + 1}` // Ex: "2025-4"
 
-          // If this month doesn't exist in the months object, create it
           if (!months[monthKey]) {
             months[monthKey] = []
           }
@@ -66,12 +66,12 @@ export class TransactionHelper {
       const incomes = transactions.filter(t => !t.isSpend)
 
       const totalSpends = spends.reduce(
-        (acc: Money, curr) => acc.add(new Money(curr.amount)),
+        (acc: Money, curr) => acc.add(new Money(curr.amount / 100)),
         new Money(0)
       )
 
       const totalIncomes = incomes.reduce(
-        (acc: Money, curr) => acc.add(new Money(curr.amount)),
+        (acc: Money, curr) => acc.add(new Money(curr.amount / 100)),
         new Money(0)
       )
 
@@ -81,9 +81,9 @@ export class TransactionHelper {
         spends,
         incomes,
         details: {
-          totalSpends: totalSpends.getReais(),
-          totalIncomes: totalIncomes.getReais(),
-          overallBalance: overallBalance.getReais(),
+          totalSpends: totalSpends.getCents(),
+          totalIncomes: totalIncomes.getCents(),
+          overallBalance: overallBalance.getCents(),
         },
       }
     }

@@ -3,28 +3,31 @@ import z from 'zod'
 import { TagsController } from '#/controller/TagsController'
 import { db } from '#/drizzle/client'
 import { StatusCodes } from '#/enums/status-code'
-import { TagNotFoundError } from '#/errors/custom/TagError'
 import { catchError } from '#/utils/catchError'
-import { updateTagSchema } from '#/zod/tagSchema'
+import { selectTagSchema } from '#/zod/tagSchema'
 
-export const updateTagRoute: FastifyPluginAsyncZod = async app => {
-  app.patch(
-    '/update',
+export const getMostUsedTagsRoute: FastifyPluginAsyncZod = async app => {
+  app.get(
+    '/most-used',
     {
       schema: {
-        summary: 'Update tag',
+        summary: 'Get most used tags',
         tags: ['Tags'],
-        operationId: 'updateTag',
-        body: z.object({
-          id: z.number(),
-          name: z.string().optional(),
-          color: z.string(),
-          description: z.string().optional(),
-          monthGoal: z.number(),
+        operationId: 'getMostUsedTags',
+        querystring: z.object({
+          limit: z.string().optional(),
         }),
         response: {
-          [StatusCodes.OK]: updateTagSchema,
-          [StatusCodes.NOT_FOUND]: z.object({
+          [StatusCodes.OK]: z.array(
+            z.object({
+              id: z.number(),
+              name: z.string(),
+              color: z.string(),
+              monthGoal: z.number(),
+              usageCount: z.number(),
+            })
+          ),
+          [StatusCodes.INTERNAL_SERVER_ERROR]: z.object({
             name: z.string(),
             message: z.string(),
           }),
@@ -32,18 +35,12 @@ export const updateTagRoute: FastifyPluginAsyncZod = async app => {
       },
     },
     async (request, reply) => {
-      const { id, name, color, description, monthGoal } = request.body
+      const { limit } = request.query
+      const limitNumber = limit ? Number.parseInt(limit) : undefined
       const tagsController = new TagsController(db)
 
       const [error, data] = await catchError(
-        tagsController.updateTag({
-          tagId: id,
-          name,
-          color,
-          description,
-          monthGoal,
-        }),
-        new TagNotFoundError()
+        tagsController.getMostUsedTags({ limit: limitNumber })
       )
 
       if (error) {

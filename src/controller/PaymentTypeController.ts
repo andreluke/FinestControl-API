@@ -1,12 +1,13 @@
-import { and, desc, eq, isNotNull, isNull } from 'drizzle-orm'
+import { and, count, desc, eq, gte, isNotNull, isNull, lte } from 'drizzle-orm'
 import type {
   CreatePaymentTypeParams,
   GetPaymentTypeParams,
   RemovePaymentTypeParams,
   UpdatePaymentTypeParams,
 } from '#/@types/controller/PaymentType'
+import type { GetMostUsedPaymentTypesParams } from '#/@types/controller/PaymentType/IGetMostUsedPaymentTypes'
 import type { DbOrTx } from '#/@types/libs'
-import { paymentType } from '#/drizzle/schemas'
+import { paymentType, transactions } from '#/drizzle/schemas'
 import {
   PaymentTypeAlreadyExistsError,
   PaymentTypeMissingParamsError,
@@ -68,6 +69,17 @@ export class PaymentTypeController {
       throw new PaymentTypeMissingParamsError()
     }
 
+    if (name) {
+      const paymentTypeExists = await this.getPaymentType({
+        name,
+        search: true,
+      })
+
+      if (paymentTypeExists && paymentTypeExists.id !== typeId) {
+        throw new PaymentTypeAlreadyExistsError()
+      }
+    }
+
     const [newPaymentType] = await this.db
       .update(paymentType)
       .set({
@@ -84,6 +96,56 @@ export class PaymentTypeController {
     }
 
     return newPaymentType
+  }
+
+  async getMostUsedPaymentType({ limit }: GetMostUsedPaymentTypesParams) {
+    const now = new Date()
+
+    const monthStart = new Date(
+      now.getFullYear(),
+      now.getMonth(),
+      1,
+      0,
+      0,
+      0,
+      0
+    )
+    const monthEnd = new Date(
+      now.getFullYear(),
+      now.getMonth() + 1,
+      0,
+      23,
+      59,
+      59,
+      999
+    )
+
+    const query = this.db
+      .select({
+        id: paymentType.id,
+        name: paymentType.name,
+        icon: paymentType.icon,
+        usageCount: count(transactions.id).as('usage_count'),
+      })
+      .from(paymentType)
+      .leftJoin(transactions, eq(paymentType.id, transactions.paymentTypeId))
+      .groupBy(paymentType.id, paymentType.name)
+      .orderBy(desc(count(transactions.id)))
+      .where(
+        and(
+          gte(transactions.createdAt, monthStart),
+          lte(transactions.createdAt, monthEnd)
+        )
+      )
+      .limit(limit ?? 10)
+
+    const tagsList = await query
+
+    const filteredTagsList = tagsList.filter(tag => {
+      return tag.usageCount > 0
+    })
+
+    return filteredTagsList
   }
 
   async removePaymentType({ typeId }: RemovePaymentTypeParams) {

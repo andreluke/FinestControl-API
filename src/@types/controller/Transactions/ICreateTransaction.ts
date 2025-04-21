@@ -3,4 +3,5 @@ export interface CreateTransactionParams {
   isSpend: boolean
   paymentTypeId: number
   tagId: number
+  createdAt?: Date
 }

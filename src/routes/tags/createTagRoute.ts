@@ -22,6 +22,7 @@ export const createTagRoute: FastifyPluginAsyncZod = async app => {
           name: z.string(),
           color: z.string(),
           description: z.string().optional(),
+          monthGoal: z.number().optional(),
         }),
         response: {
           [StatusCodes.CREATED]: insertTagSchema,
@@ -33,7 +34,7 @@ export const createTagRoute: FastifyPluginAsyncZod = async app => {
       },
     },
     async (request, reply) => {
-      const { name, color, description } = request.body
+      const { name, color, description, monthGoal } = request.body
       const tagsController = new TagsController(db)
 
       const [error, data] = await catchError(
@@ -41,6 +42,7 @@ export const createTagRoute: FastifyPluginAsyncZod = async app => {
           name,
           color,
           description,
+          monthGoal: monthGoal ?? 0,
         }),
         new TagAlreadyExistsError()
         // new TagInvalidColor(color ?? '')

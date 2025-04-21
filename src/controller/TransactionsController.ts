@@ -126,6 +126,7 @@ export class TransactionsController {
         paymentType: paymentType.name,
         tagName: tags.name,
         tagColor: tags.color,
+        tagGoal: tags.monthGoal,
         amount: transactions.amount,
         createdAt: transactions.createdAt,
         isSpend: transactions.isSpend,
@@ -265,9 +266,9 @@ export class TransactionsController {
     isSpend,
     paymentTypeId,
     tagId,
+    createdAt,
   }: CreateTransactionParams) {
-    const payment =
-      amount % 1 !== 0 ? new Money(amount) : new Money(amount / 100)
+    const payment = new Money(amount)
 
     const paymentType = await this.paymentTypeController.getPaymentType({
       typeId: paymentTypeId,
@@ -287,6 +288,7 @@ export class TransactionsController {
           isSpend,
           paymentTypeId: paymentType.id,
           tagId: tag.id,
+          createdAt: createdAt ?? new Date(),
         })
         .returning()
 

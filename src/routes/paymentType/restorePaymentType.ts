@@ -14,7 +14,7 @@ export const restorePaymentTypeRoute: FastifyPluginAsyncZod = async app => {
       schema: {
         summary: 'Restore a Payment Type',
         tags: ['Payment Types'],
-        operationId: 'removePaymentType',
+        operationId: 'restorePaymentType',
         params: z.object({
           id: z.string(),
         }),
