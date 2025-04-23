@@ -500,51 +500,43 @@ var style = `
 `;
 
 // src/config/logger.ts
-import pc from "picocolors";
+import { ZodError } from "zod";
 async function logger(app2) {
   let startTime;
-  let messageName;
   app2.addHook("onRequest", (request, reply, done) => {
+    request.log.info({ req: request }, "Request received");
     startTime = Date.now();
-    done();
-  });
-  app2.addHook("onSend", (request, reply, payload, done) => {
-    if (reply.statusCode >= 400 /* BAD_REQUEST */) {
-      const parsedPayload = JSON.parse(payload);
-      if (parsedPayload?.name) {
-        messageName = parsedPayload.name;
-      }
-    }
     done();
   });
   app2.addHook("onResponse", (request, reply, done) => {
     const responseTime = Date.now() - startTime;
-    const statusCode = reply.statusCode;
-    let statusColor = pc.green;
-    switch (true) {
-      case (statusCode >= 300 /* MULTIPLE_CHOICES */ && statusCode < 400 /* BAD_REQUEST */):
-        statusColor = pc.yellow;
-        break;
-      case statusCode >= 400 /* BAD_REQUEST */:
-        statusColor = pc.red;
-        break;
+    const logPayload = {
+      res: reply,
+      responseTime,
+      statusCode: reply.statusCode,
+      url: request.url,
+      method: request.method
+    };
+    if (reply.statusCode >= 400 /* BAD_REQUEST */) {
+      request.log.error(logPayload, "Response sent with error status");
+    } else {
+      request.log.info(logPayload, "Response sent");
     }
-    if (!request.url.includes("/docs") && !request.url.includes("/favicon.ico")) {
-      console.info(
-        pc.yellow("Response: ") + statusColor(
-          `${request.method} ${request.url} - ${statusCode} - ${responseTime}ms ${messageName ? `- Error name: ${messageName}` : ""}`
-        )
-      );
-    }
-    messageName = "";
     done();
   });
   app2.setErrorHandler((error, request, reply) => {
-    if (error.code === "FST_ERR_VALIDATION") {
-      const validation = error.validation?.[0];
+    request.log.error(
+      {
+        err: error,
+        url: request.url,
+        method: request.method
+      },
+      "Request errored"
+    );
+    if (error instanceof ZodError) {
       return reply.status(400 /* BAD_REQUEST */).send({
         name: "ValidationError",
-        message: validation?.message || "Erro de valida\xE7\xE3o."
+        message: error.errors[0]?.message ?? "Erro de valida\xE7\xE3o."
       });
     }
     return reply.status(500 /* INTERNAL_SERVER_ERROR */).send({
@@ -557,7 +549,7 @@ async function logger(app2) {
 // src/config/plugins.ts
 function registerPlugins(app2) {
   app2.register(fastifyCors, {
-    origin: [portSettings.BASE_URL, portSettings.WEB_URL],
+    origin: ["*"],
     methods: ["*"]
   });
   app2.register(fastifySwagger, {
@@ -2375,7 +2367,7 @@ var getMonthAmountRoute = async (app2) => {
   );
 };
 
-// src/routes/totalAmount/getRoughAmountROute.ts
+// src/routes/totalAmount/getRoughAmountRoute.ts
 import z23 from "zod";
 var getRoughAmountRoute = async (app2) => {
   app2.get(
@@ -3220,10 +3212,19 @@ function registerRoutes(app2) {
 }
 
 // src/index.ts
-var app = fastify().withTypeProvider();
+var app = fastify({ logger: {
+  transport: {
+    target: "pino-pretty",
+    options: {
+      colorize: true,
+      translateTime: "SYS:standard",
+      ignore: "pid,hostname"
+    }
+  }
+} }).withTypeProvider();
 registerPlugins(app);
 registerRoutes(app);
-app.listen({ port: env.PORT }).then(() => {
+app.listen({ port: env.PORT, host: "0.0.0.0" }).then(() => {
   console.log(`HTTP server running on port ${portSettings.PORT}`);
   console.log(`See the documentation on ${portSettings.BASE_URL}/docs`);
 });

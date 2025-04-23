@@ -13,7 +13,7 @@ import { logger } from './logger'
 
 export function registerPlugins(app: FastifyInstance) {
   app.register(fastifyCors, {
-    origin: [portSettings.BASE_URL, portSettings.WEB_URL],
+    origin: ['*'],
     methods: ['*'],
   })
 
