@@ -32,6 +32,26 @@ A robust and scalable **financial control REST API** built with **TypeScript**, 
 
 ---
 
+## ⚡ Quickstart
+
+```bash
+git clone https://github.com/andreluke/FinestControl-API.git
+cd FinestControl-API
+
+pnpm install
+
+cp .env.dev .env
+
+docker-compose up -d
+
+pnpm drizzle:migrate
+
+pnpm dev
+```
+The API will be available at `http://localhost:3000`.
+
+---
+
 ## 📂 Project Structure
 
 ```text
